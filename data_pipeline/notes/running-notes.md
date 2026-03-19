@@ -158,3 +158,34 @@
 - That means the next converter pass should either:
   - run in a dedicated offline environment that has the LeRobot dataset stack installed, or
   - start with a dependency-light alignment/diagnostics pass before wiring in final LeRobot export.
+
+### Offline converter environment pass
+
+- Added `data_pipeline/requirements-converter.txt` as a focused dependency set for rosbag reading and LeRobot dataset export.
+- Added `data_pipeline/setup_converter_env.sh` to bootstrap the offline environment reproducibly from the repository root.
+- Chose a system-Python 3.12 virtual environment with `--system-site-packages` as the baseline because it keeps `rosbag2_py` and `rclpy` compatible with the installed ROS 2 Jazzy runtime.
+- The host is missing `python3.12-venv`, so the bootstrap script falls back to `virtualenv` when the stdlib `venv` path cannot seed pip.
+
+### GPU environment decision
+
+- Initially tested a CPU-only Torch path to keep the environment lighter.
+- Switched to GPU-enabled Torch after confirming the machine has discrete GPUs and enough disk headroom to absorb the bundled CUDA runtime wheels.
+- The final environment keeps the live ROS tooling on system Python and uses `.venv` only for offline conversion and LeRobot-facing work.
+
+### Offline environment validation
+
+- Bootstrapped `.venv` successfully with:
+  - LeRobot installed editable from the local `lerobot/` checkout
+  - `torch 2.6.0+cu124`
+  - `torchvision 0.21.0`
+  - `scipy 1.17.1`
+- Verified that the same interpreter can import all of:
+  - `rosbag2_py`
+  - `rclpy`
+  - `lerobot.datasets.lerobot_dataset`
+  - `scipy`
+  - `torch`
+- Verified GPU visibility inside `.venv`:
+  - CUDA available: `True`
+  - device count: `2`
+  - first device reported as `NVIDIA RTX A5500`
