@@ -240,3 +240,21 @@
 - The stable robot-state topics are now emitted continuously from the Teleop runtime loop.
 - The stable command topics are currently wired for the Spark joint-control path, because that is where the actual joint command vector and derived gripper command are available in this codebase.
 - Other control modes in `TeleopSoftware` still do not publish a V1-compatible joint-command topic, so the current `multisensor_20hz` action contract should still be treated as Spark-mode-first until those modes are either instrumented or split into a different published profile.
+
+### Minimal eval path
+
+- Added `data_pipeline/validate_eval_set.py` as a small standing-eval driver for V1.
+- The eval script can:
+  - generate the canonical dummy tactile episode,
+  - convert it into an isolated published root,
+  - optionally convert one or more user-supplied real raw episodes,
+  - reload the resulting LeRobot datasets, and
+  - write one machine-readable summary to `reports/evaluation_summary.json`.
+- Validated the dummy-only path with:
+  - `.venv/bin/python data_pipeline/validate_eval_set.py --work-root /tmp/pipeline_eval_test --clean`
+- That run completed successfully and produced:
+  - `entries = 1`
+  - `failures = 0`
+  - a published eval dataset under `/tmp/pipeline_eval_test/published/eval_dummy_multisensor_v1`
+  - an eval report at `/tmp/pipeline_eval_test/reports/evaluation_summary.json`
+- The script intentionally keeps the real-episode check optional unless `--require-real` is passed, so the dummy path can run in CI or on development machines without attached hardware while still supporting the standing real-episode check once one is recorded.
