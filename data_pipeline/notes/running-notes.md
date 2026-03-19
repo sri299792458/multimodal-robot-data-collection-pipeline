@@ -296,3 +296,16 @@
 - Verified the launch file interface under the built overlay:
   - `ros2 launch data_pipeline/launch/realsense_contract.launch.py --show-args`
 - Did not run a live camera acquisition test in this turn because no RealSense devices were attached to validate against.
+
+### Workflow documentation pass
+
+- Added `data_pipeline/configs/sensors.example.yaml` so the `--sensors-file` path in `record_episode.py` has a concrete starting template for inventory serials and calibration references.
+- Added `data_pipeline/README.md` as a minimal operator runbook covering:
+  - environment setup,
+  - RealSense bridge build,
+  - contract sensor launch using the existing per-sensor entrypoints,
+  - raw recording,
+  - single-episode conversion, and
+  - standing eval usage.
+- Updated the repository root `README.md` so the data-pipeline section now points readers to the new runbook first instead of only the spec and notes.
+- Deliberately did not keep extra orchestration or batch-conversion wrappers before hardware validation; the runtime surface remains the existing recorder, converter, eval script, and per-sensor launch entrypoints.

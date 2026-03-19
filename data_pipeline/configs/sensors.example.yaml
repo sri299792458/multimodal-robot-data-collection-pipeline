@@ -1,0 +1,22 @@
+sensors:
+  wrist:
+    serial_number: "WRIST-REALSENSE-SERIAL"
+    model: "Intel RealSense D405"
+    firmware_version: "5.16.x"
+    calibration_ref: "calib://realsense/wrist/v1"
+
+  scene:
+    serial_number: "SCENE-REALSENSE-SERIAL"
+    model: "Intel RealSense D435"
+    firmware_version: "5.16.x"
+    calibration_ref: "calib://realsense/scene/v1"
+
+  left:
+    serial_number: "GELSIGHT-LEFT-SERIAL"
+    model: "GelSight Mini"
+    calibration_ref: "calib://gelsight/left/v1"
+
+  right:
+    serial_number: "GELSIGHT-RIGHT-SERIAL"
+    model: "GelSight Mini"
+    calibration_ref: "calib://gelsight/right/v1"
