@@ -116,3 +116,21 @@
 - Use `realsense-ros` as the upstream camera publisher base, then remap/bridge its topics into the stable `/spark/cameras/...` contract.
 - Build a small ROS 2 GelSight bridge on top of `gsrobotics` to publish `/spark/tactile/{left,right}/color/image_raw` and optional raw-only derived topics with the declared timestamp semantics.
 - Keep the recorder/converter under `data_pipeline/` and isolate any sensor/runtime glue from the dataset conversion logic.
+
+### Runtime bridge implementation pass
+
+- Added `data_pipeline/launch/realsense_contract.launch.py` to start two official RealSense ROS 2 camera nodes under the stable V1 namespace: `/spark/cameras/wrist/...` and `/spark/cameras/scene/...`.
+- Added `data_pipeline/gelsight_bridge.py` as a ROS 2 node that publishes `/spark/tactile/{left,right}/color/image_raw` from the official `gsrobotics` camera path using host ROS time immediately after frame capture.
+- Added `data_pipeline/launch/gelsight_contract.launch.py` to start left and right GelSight bridge processes with explicit device-path or device-index arguments.
+
+### RealSense timestamp caveat
+
+- Reading the official `realsense-ros` source showed that its published image stamps are derived from RealSense frame timestamps rather than the exact `host_capture_time_v1` rule declared in the V1 topic contract.
+- The current launch file is still useful for getting the ROS 2 topic names, types, and camera process boundary aligned with the contract.
+- We still need one follow-up pass for RealSense timestamp semantics: either patch the local wrapper checkout or replace it with a small SDK-based publisher that stamps frames immediately after `wait_for_frames()` returns.
+
+### Validation notes
+
+- `gelsight_bridge.py` imports and CLI parsing were validated under `/usr/bin/python3`.
+- Both launch files were syntax-checked and validated with `ros2 launch ... --show-args`.
+- The official `gsrobotics` camera helper imports `cv2.typing`, which is not available in the system OpenCV build here, so the ROS bridge uses a small local OpenCV capture wrapper while still reusing the official image-processing path.
