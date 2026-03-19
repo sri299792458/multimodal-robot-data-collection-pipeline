@@ -1,0 +1,302 @@
+# Dataset Mapping
+
+## Purpose
+
+This document defines how raw episode bags are converted into the published V1 LeRobot dataset.
+
+The raw bag preserves asynchronous truth.
+The published dataset is a fixed-rate aligned view of that raw data.
+
+
+## Published Profile
+
+V1 publishes one profile:
+
+- `multisensor_20hz`
+
+### Why
+
+If GelSight is a first-class published modality, then 20 Hz is the most honest default common rate. A faster published rate would either duplicate tactile frames too aggressively or claim more temporal precision than the raw streams actually support.
+
+
+## Canonical Published Time Grid
+
+For each raw episode:
+
+1. Load all required published streams.
+2. Compute:
+   - `t_start = max(first timestamp of each required published stream)`
+   - `t_end = min(last timestamp of each required published stream)`
+3. Define:
+   - `t_k = t_start + k / 20.0`
+4. Keep frame indices while `t_k <= t_end`.
+
+### Why
+
+This creates one explicit frame timeline for the published episode. The timeline is no longer implicit in whichever modality happened to be processed first. This is the cleanest form for LeRobot and for downstream learning code.
+
+
+## Published Observation Schema
+
+V1 publishes:
+
+- `observation.state`
+- `action`
+- `observation.images.wrist`
+- `observation.images.scene`
+- `observation.images.gelsight_left` when present
+- `observation.images.gelsight_right` when present
+
+### Why
+
+This is the smallest multimodal schema that still captures the key training signal:
+
+- robot state
+- commanded action
+- scene RGB
+- wrist RGB
+- tactile RGB
+
+For the bimanual setup, `multisensor_20hz` uses a fixed arm order:
+
+1. `lightning`
+2. `thunder`
+
+That ordering must not change across episodes.
+This profile assumes both arms are present. If we later want a single-arm published dataset, that should be a separate profile rather than a partially filled version of this one.
+
+Depth and other derived products remain available in the raw layer without burdening the first public dataset contract.
+
+
+## Observation State Definition
+
+V1 `observation.state` is a flat numeric vector built in this order:
+
+### `lightning`
+
+1. `lightning_joint_pos_1`
+2. `lightning_joint_pos_2`
+3. `lightning_joint_pos_3`
+4. `lightning_joint_pos_4`
+5. `lightning_joint_pos_5`
+6. `lightning_joint_pos_6`
+7. `lightning_eef_x`
+8. `lightning_eef_y`
+9. `lightning_eef_z`
+10. `lightning_eef_rx`
+11. `lightning_eef_ry`
+12. `lightning_eef_rz`
+13. `lightning_gripper_position`
+14. `lightning_ft_fx`
+15. `lightning_ft_fy`
+16. `lightning_ft_fz`
+17. `lightning_ft_tx`
+18. `lightning_ft_ty`
+19. `lightning_ft_tz`
+
+### `thunder`
+
+20. `thunder_joint_pos_1`
+21. `thunder_joint_pos_2`
+22. `thunder_joint_pos_3`
+23. `thunder_joint_pos_4`
+24. `thunder_joint_pos_5`
+25. `thunder_joint_pos_6`
+26. `thunder_eef_x`
+27. `thunder_eef_y`
+28. `thunder_eef_z`
+29. `thunder_eef_rx`
+30. `thunder_eef_ry`
+31. `thunder_eef_rz`
+32. `thunder_gripper_position`
+33. `thunder_ft_fx`
+34. `thunder_ft_fy`
+35. `thunder_ft_fz`
+36. `thunder_ft_tx`
+37. `thunder_ft_ty`
+38. `thunder_ft_tz`
+
+### Why
+
+This keeps all robot-side low-dimensional state in one compact feature, which is the easiest shape for LeRobot-style datasets and policy code. It also avoids prematurely creating many custom low-dimensional namespaces.
+
+
+## Action Definition
+
+V1 `action` is a flat numeric vector built in this order:
+
+### `lightning`
+
+1. `lightning_cmd_joint_1`
+2. `lightning_cmd_joint_2`
+3. `lightning_cmd_joint_3`
+4. `lightning_cmd_joint_4`
+5. `lightning_cmd_joint_5`
+6. `lightning_cmd_joint_6`
+7. `lightning_cmd_gripper`
+
+### `thunder`
+
+8. `thunder_cmd_joint_1`
+9. `thunder_cmd_joint_2`
+10. `thunder_cmd_joint_3`
+11. `thunder_cmd_joint_4`
+12. `thunder_cmd_joint_5`
+13. `thunder_cmd_joint_6`
+14. `thunder_cmd_gripper`
+
+### Why
+
+The V1 action is the command sent by the teleoperation/runtime stack. This is more stable and more semantically honest than silently replacing action with a derived delta later in the pipeline.
+
+
+## Per-Topic Alignment Rules
+
+### Robot state
+
+Sources:
+
+- `/spark/lightning/robot/joint_state`
+- `/spark/lightning/robot/eef_pose`
+- `/spark/lightning/robot/tcp_wrench`
+- `/spark/lightning/robot/gripper_state`
+- `/spark/thunder/robot/joint_state`
+- `/spark/thunder/robot/eef_pose`
+- `/spark/thunder/robot/tcp_wrench`
+- `/spark/thunder/robot/gripper_state`
+
+Alignment rule:
+
+- choose the latest sample with timestamp `<= t_k`
+
+Validity threshold:
+
+- max age 50 ms
+
+### Why
+
+Robot state is causal and should not look into the future relative to the published frame time. Latest-before is the correct rule for a state signal that is being sampled onto a coarser grid.
+
+
+### Action
+
+Sources:
+
+- `/spark/lightning/teleop/cmd_joint_state`
+- `/spark/lightning/teleop/cmd_gripper_state`
+- `/spark/thunder/teleop/cmd_joint_state`
+- `/spark/thunder/teleop/cmd_gripper_state`
+
+Alignment rule:
+
+- choose the latest sample with timestamp `<= t_k`
+
+Validity threshold:
+
+- max age 50 ms
+
+### Why
+
+Action is also causal. A nearest-future command would make the published sample look as though the system already knew a command that had not yet been issued.
+
+
+### Wrist and scene RGB
+
+Sources:
+
+- `/spark/cameras/wrist/color/image_raw`
+- `/spark/cameras/scene/color/image_raw`
+
+Alignment rule:
+
+- choose the nearest sample to `t_k`
+
+Validity threshold:
+
+- max skew 25 ms
+
+### Why
+
+Image streams are observations, not control signals. Nearest is the correct rule for selecting the frame that best represents the scene around the target time.
+
+
+### GelSight RGB
+
+Sources:
+
+- `/spark/tactile/left/color/image_raw`
+- `/spark/tactile/right/color/image_raw`
+
+Alignment rule:
+
+- choose the nearest sample to `t_k`
+
+Validity threshold:
+
+- max skew 25 ms
+
+### Why
+
+GelSight RGB is treated like a tactile image stream. Nearest-to-grid keeps the published episode visually coherent without pretending tactile updates happen exactly on the grid.
+
+
+## Missing Data Policy
+
+If a required modality is outside its validity threshold:
+
+- if the failure occurs only at the episode tail, truncate the episode at the last valid frame
+- otherwise fail conversion for that episode
+
+### Why
+
+Silent filling of large gaps hides real collection problems and makes the dataset look healthier than it is. Tail truncation is acceptable because it only shortens the usable interval. Mid-episode failures should be made explicit.
+
+
+## Raw-Only Modalities
+
+The following topics remain raw-only in V1:
+
+- `/spark/cameras/wrist/depth/image_rect_raw`
+- `/spark/cameras/scene/depth/image_rect_raw`
+- `/spark/tactile/left/depth/image_raw`
+- `/spark/tactile/right/depth/image_raw`
+- `/spark/tactile/left/marker_offset`
+- `/spark/tactile/right/marker_offset`
+- optional point cloud or debugging topics
+
+### Why
+
+These topics are valuable to preserve, but they complicate the first published dataset contract without being necessary for the first training and visualization workflows.
+
+
+## Multi-Sensor Rules
+
+V1 supports:
+
+- multiple RealSense sensors
+- multiple GelSight sensors
+
+The published profile only includes the sensors explicitly declared in the mapping config.
+
+### Why
+
+Support for multiple sensors comes from the raw-first design, not from trying to cram every modality into one live fused message. The mapping profile keeps the published contract small while still allowing the raw bag to preserve richer sessions.
+
+
+## Conversion Outputs
+
+For each raw episode, conversion produces:
+
+- one published episode in the shared LeRobot dataset
+- episode-level diagnostics
+
+Diagnostics should include:
+
+- usable interval
+- number of published frames
+- per-modality alignment error summary
+- count of invalid or dropped frames
+
+### Why
+
+A successful conversion should mean more than "the script finished." We need enough diagnostics to judge whether the episode quality is acceptable.

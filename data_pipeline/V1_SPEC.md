@@ -1,0 +1,378 @@
+# Data Pipeline V1 Spec
+
+## 1. Goal
+
+Build a clean data collection and conversion pipeline inside `data_pipeline/`.
+
+V1 is for:
+
+- recording demos
+- preserving raw ROS data
+- converting demos into one published LeRobot dataset
+
+V1 is not for:
+
+- live policy inference
+- controller logic
+- runtime latency compensation
+- audio/contact microphones
+- multi-episode segmentation inside one bag
+
+
+## 2. Boundary
+
+- `TeleopSoftware/` remains the legacy topic producer.
+- `data_pipeline/` owns recording, metadata, conversion, and validation.
+- New pipeline code should depend on ROS topics, config files, and its own metadata.
+- New pipeline code should not depend on legacy teleop internals as a library.
+
+
+## 3. Runtime Base
+
+- Use the `main` branch runtime as the starting point.
+- Port any missing command topics we need from `data_collection`.
+- Do not reuse `data_collection.py`.
+
+### Why
+
+`main` is the cleaner runtime base. `data_collection.py` is the part we are replacing.
+
+
+## 4. Environment
+
+- Use system ROS 2 Jazzy for live topic production and bag recording.
+- Conda or other Python environments are fine for offline conversion, inspection, and training.
+- Live ROS capture must not depend on Conda activation.
+
+
+## 5. Recording Unit
+
+- one demo = one rosbag = one raw episode
+
+This means:
+
+- bag start = episode start
+- bag stop = episode end
+- no in-bag episode boundary logic in V1
+
+
+## 6. Directory Layout
+
+V1 work lives under `data_pipeline/`.
+
+Expected files:
+
+- `data_pipeline/V1_SPEC.md`
+- `data_pipeline/AGENTS.md`
+- `data_pipeline/docs/topic-contract.md`
+- `data_pipeline/docs/dataset-mapping.md`
+- `data_pipeline/configs/multisensor_20hz.yaml`
+- `data_pipeline/record_episode.py`
+- `data_pipeline/convert_episode_bag_to_lerobot.py`
+- `data_pipeline/generate_dummy_episode.py`
+
+
+## 7. Raw Output
+
+Each episode is stored as:
+
+```text
+raw_episodes/
+  episode-YYYYMMDD-HHMMSS/
+    bag/
+    episode_manifest.json
+    notes.md
+```
+
+`episode_manifest.json` must include at least:
+
+- `episode_id`
+- `dataset_id`
+- `task_name`
+- `robot_id`
+- `operator`
+- `start_time_ns`
+- `end_time_ns`
+- `topics`
+- `topic_types`
+- `sensors`
+- `mapping_profile`
+- `profile_version`
+- `clock_policy`
+- `git_commit`
+
+The `sensors` section must include per-sensor identity when available:
+
+- `sensor_name`
+- `sensor_type`
+- `topic_names`
+- `serial_number`
+- `model`
+- `firmware_version`
+- `resolution`
+- `fps`
+- `driver_node`
+- `calibration_ref`
+
+For RealSense cameras, serial number is required.
+
+
+## 8. Raw Layer Rule
+
+The raw layer is the source of truth.
+
+That means:
+
+- record stamped raw topics
+- preserve native per-topic rates
+- do not force all topics to one live fused stream
+- do not overwrite raw timing semantics during recording
+
+
+## 9. Topic Contract
+
+Every topic we may care about later must satisfy both:
+
+- it is recorded raw in the bag
+- its timestamp meaning is documented in `topic-contract.md`
+
+Each topic entry must document:
+
+- topic name
+- message type
+- producer node
+- semantic type: sensor, state, command, derived, debug
+- timestamp meaning
+- expected rate
+- required or optional
+- raw-only or published
+
+The stable V1 topic surface should be under `/spark/...`.
+Legacy `/lightning_*` topics are bridge inputs, not the long-term contract.
+
+
+## 10. Robot Topics
+
+V1 does not require a mandatory fused robot topic.
+
+Primary rule:
+
+- preserve stamped raw robot state topics
+- preserve stamped raw robot command topics
+
+An optional convenience topic like `/spark/robot_frame` can be added later, but it is not required for V1.
+
+
+## 11. Two-Arm Assumption
+
+The setup is bimanual.
+
+V1 must assume:
+
+- `lightning` and `thunder` both exist
+- both arms may contribute state and command topics
+
+If both arms are published into `observation.state` or `action`, the mapping profile must define a fixed arm order.
+
+
+## 12. Timestamp Policy
+
+V1 uses one canonical policy:
+
+- `clock_policy = host_capture_time_v1`
+
+Meaning:
+
+- RealSense topics are stamped with host ROS time immediately after frame acquisition
+- GelSight topics are stamped with host ROS time immediately after raw image acquisition
+- robot measured state topics are stamped at the update tick they represent
+- robot command topics are stamped when the command is issued
+
+If a device exposes richer hardware timestamps, those may be recorded as extra metadata or diagnostics, but they are not the canonical alignment clock in V1.
+
+
+## 13. Device Rules
+
+### RealSense
+
+- record RGB
+- record depth
+- stamp immediately after frame acquisition
+- log sensor serial number in metadata
+
+### GelSight
+
+- record tactile RGB
+- if depth, marker offsets, or point clouds already exist, they may also be recorded raw
+- stamp immediately after raw image acquisition
+- reconstruction latency must not define the canonical timestamp
+
+### Robot
+
+- record measured state topics
+- record command topics
+- keep state and command as distinct semantic classes
+
+
+## 14. Published Dataset
+
+V1 publishes one aligned LeRobot profile:
+
+- `mapping_profile = multisensor_20hz`
+- `dataset_fps = 20`
+
+Why `20 Hz`:
+
+- it matches the slower tactile-first multimodal setup better than pretending the dataset is 30 Hz
+
+
+## 15. Published Schema
+
+Keep the V1 published schema small:
+
+- `observation.state`
+- `action`
+- `observation.images.wrist`
+- `observation.images.scene`
+- `observation.images.gelsight_left`
+- `observation.images.gelsight_right`
+
+Only include the GelSight image streams that actually exist in the recording setup.
+
+Recommended `observation.state` contents:
+
+- joint positions
+- end-effector pose
+- gripper position
+- force-torque values
+
+Recommended `action` contents:
+
+- teleop/runtime command sent to the robot
+- commanded gripper value
+
+
+## 16. Raw-Only vs Published
+
+Record in raw by default:
+
+- RealSense RGB
+- RealSense depth
+- GelSight RGB
+- robot state topics
+- robot command topics
+
+Keep raw-only in V1:
+
+- RealSense depth
+- GelSight reconstructed depth
+- GelSight point clouds
+- GelSight marker offsets
+- debug topics
+
+Publish in V1:
+
+- RealSense RGB
+- GelSight RGB
+- robot state mapped into `observation.state`
+- command mapped into `action`
+
+
+## 17. Alignment Rules
+
+For each episode:
+
+1. Determine the usable interval:
+   - `t_start = max(first timestamp of each required published modality)`
+   - `t_end = min(last timestamp of each required published modality)`
+2. Define the frame grid:
+   - `t_k = t_start + k / 20.0`
+3. Align each modality onto that grid:
+   - robot state: latest sample with timestamp `<= t_k`
+   - action: latest sample with timestamp `<= t_k`
+   - RGB cameras: nearest sample to `t_k`
+   - GelSight RGB: nearest sample to `t_k`
+
+Default thresholds:
+
+- robot state max age: `50 ms`
+- action max age: `50 ms`
+- camera max skew: `25 ms`
+- GelSight max skew: `25 ms`
+
+If a required modality is missing within threshold:
+
+- trim the episode tail if the failure is only at the end
+- otherwise fail conversion for that episode
+
+
+## 18. Diagnostics
+
+Each conversion run must save machine-readable artifacts, not just terminal output.
+
+At minimum:
+
+- `diagnostics.json`
+- effective mapping profile snapshot
+- conversion summary: `pass`, `fail`, or `truncated_tail`
+
+Diagnostics should include at least:
+
+- per-topic observed rate
+- inter-arrival statistics
+- max skew per modality
+- invalid or skipped frame count
+- episode duration
+- published frame count
+
+
+## 19. Minimal Eval Path
+
+V1 should keep a very small standing eval set:
+
+- at least one dummy episode
+- at least one real episode
+
+Every meaningful converter or contract change should be checked against that set.
+
+Keep this simple. V1 does not need a large eval framework.
+
+
+## 20. Success Criteria
+
+V1 is successful when:
+
+- one demo can be recorded as one raw rosbag episode
+- episode metadata is complete and includes sensor identity
+- raw topics preserve native timing and timestamp semantics
+- raw episodes can be converted into one valid LeRobot dataset
+- the published dataset loads without ROS dependencies
+- multiple RealSense and GelSight sensors can coexist under the same timestamp policy
+- converter output includes diagnostics
+
+
+## 21. Implementation Order
+
+Build in this order:
+
+1. finalize the `/spark/...` topic contract
+2. bridge legacy runtime topics into that contract where needed
+3. implement `record_episode.py`
+4. implement `generate_dummy_episode.py`
+5. implement `convert_episode_bag_to_lerobot.py`
+6. validate on dummy data
+7. validate on one real recorded episode
+
+
+## 22. Short Version
+
+V1 is intentionally simple:
+
+- one demo per bag
+- raw bag is truth
+- one honest published profile at 20 Hz
+- one shared host-capture timestamp policy
+- small published schema
+- depth and derived tactile stay raw-only
+- sensor identity is logged
+- diagnostics are saved
