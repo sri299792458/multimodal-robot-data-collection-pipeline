@@ -16,6 +16,8 @@ from launch_helpers.tk_functions import *
 # Update to ROS2
 import rclpy
 from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped, WrenchStamped
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Float32MultiArray, String, Bool, Float32, Int32
 
 class GUI(Node):
@@ -72,6 +74,24 @@ class GUI(Node):
             pubs[arm+"_safety_mode"] = self.create_publisher(Int32, f"/{arm.lower()}_safety_mode", 10)
             # # Force offset
             pubs[arm+"_force_offset"] = self.create_publisher(Float32MultiArray, f"/{arm.lower()}_force_offset", 10)
+            pubs[arm+"_robot_joint_state"] = self.create_publisher(
+                JointState, f"/spark/{arm.lower()}/robot/joint_state", 10
+            )
+            pubs[arm+"_robot_eef_pose"] = self.create_publisher(
+                PoseStamped, f"/spark/{arm.lower()}/robot/eef_pose", 10
+            )
+            pubs[arm+"_robot_tcp_wrench"] = self.create_publisher(
+                WrenchStamped, f"/spark/{arm.lower()}/robot/tcp_wrench", 10
+            )
+            pubs[arm+"_robot_gripper_state"] = self.create_publisher(
+                JointState, f"/spark/{arm.lower()}/robot/gripper_state", 10
+            )
+            pubs[arm+"_teleop_cmd_joint_state"] = self.create_publisher(
+                JointState, f"/spark/{arm.lower()}/teleop/cmd_joint_state", 10
+            )
+            pubs[arm+"_teleop_cmd_gripper_state"] = self.create_publisher(
+                JointState, f"/spark/{arm.lower()}/teleop/cmd_gripper_state", 10
+            )
 
         colors = ["light blue", "light green"]
         spark_homes = [(+0.000, -1.15192, -2.26893, 0.244346, +1.5708, +0.000), # Thunder Not used
@@ -323,7 +343,7 @@ class GUI(Node):
                 # rospy.sleep(0.01)
                 # ROS2 Sleep 
                 rclpy.spin_once(self, timeout_sec=0.01)
-                ros_update(fields, self.ros_data, control_modes, URs, pubs, optimize)
+                ros_update(fields, self.ros_data, control_modes, URs, pubs, optimize, self.get_clock())
                 # fields['Thunder']['Spark_plot'].move(point, 1, 1)
                 # fields['Lightning']['Spark_plot'].move(point, -1, -1)
         except tk.TclError:

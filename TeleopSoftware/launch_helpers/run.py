@@ -3,6 +3,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import os
 from UR.fk import forward_6
+from geometry_msgs.msg import PoseStamped, WrenchStamped
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Float32MultiArray, Float32, Bool, Int32
 
 # ROS functions ------------------------------------------------------------------------------
@@ -19,8 +21,71 @@ spark_enable = {}
 offset = [0,0,0,0]
 
 publish_ft = True
+JOINT_NAMES = [f"joint_{idx}" for idx in range(1, 7)]
 
-def ros_update(fields, ros_data, control_modes, URs, pubs, optimize):
+
+def _copy_stamp(dst, src) -> None:
+    dst.sec = src.sec
+    dst.nanosec = src.nanosec
+
+
+def _joint_state_message(stamp, names, positions) -> JointState:
+    msg = JointState()
+    _copy_stamp(msg.header.stamp, stamp)
+    msg.name = list(names)
+    msg.position = [float(value) for value in positions]
+    return msg
+
+
+def _gripper_message(stamp, name: str, value: float) -> JointState:
+    return _joint_state_message(stamp, [name], [float(value)])
+
+
+def _pose_message(stamp, pose) -> PoseStamped:
+    if len(pose) < 6:
+        raise ValueError(f"Expected 6D pose, got {pose}")
+    quat = R.from_euler("xyz", pose[3:6]).as_quat()
+    msg = PoseStamped()
+    _copy_stamp(msg.header.stamp, stamp)
+    msg.header.frame_id = "base"
+    msg.pose.position.x = float(pose[0])
+    msg.pose.position.y = float(pose[1])
+    msg.pose.position.z = float(pose[2])
+    msg.pose.orientation.x = float(quat[0])
+    msg.pose.orientation.y = float(quat[1])
+    msg.pose.orientation.z = float(quat[2])
+    msg.pose.orientation.w = float(quat[3])
+    return msg
+
+
+def _wrench_message(stamp, wrench) -> WrenchStamped:
+    if len(wrench) < 6:
+        raise ValueError(f"Expected 6D wrench, got {wrench}")
+    msg = WrenchStamped()
+    _copy_stamp(msg.header.stamp, stamp)
+    msg.header.frame_id = "tool0"
+    msg.wrench.force.x = float(wrench[0])
+    msg.wrench.force.y = float(wrench[1])
+    msg.wrench.force.z = float(wrench[2])
+    msg.wrench.torque.x = float(wrench[3])
+    msg.wrench.torque.y = float(wrench[4])
+    msg.wrench.torque.z = float(wrench[5])
+    return msg
+
+
+def _publish_stable_robot_state(arm, pubs, stamp, q, cartesian, wrench, gripper) -> None:
+    pubs[arm + "_robot_joint_state"].publish(_joint_state_message(stamp, JOINT_NAMES, q))
+    pubs[arm + "_robot_eef_pose"].publish(_pose_message(stamp, cartesian))
+    pubs[arm + "_robot_tcp_wrench"].publish(_wrench_message(stamp, wrench))
+    pubs[arm + "_robot_gripper_state"].publish(_gripper_message(stamp, "gripper", gripper))
+
+
+def _publish_stable_spark_command(arm, pubs, stamp, angles, gripper) -> None:
+    pubs[arm + "_teleop_cmd_joint_state"].publish(_joint_state_message(stamp, JOINT_NAMES, angles[:6]))
+    pubs[arm + "_teleop_cmd_gripper_state"].publish(_gripper_message(stamp, "gripper_cmd", gripper))
+
+
+def ros_update(fields, ros_data, control_modes, URs, pubs, optimize, clock):
     if 'thunder_sm_log' in ros_data:
         fields['Thunder']['SMLog'].insert(tk.END, ros_data['thunder_sm_log'])
         fields['Thunder']['SMLog'].see(tk.END)
@@ -101,8 +166,10 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize):
                                 URs.zeroFtSensor(arm)
                                 print(f"Zeroed FT sensor on {arm}")
                             if control_modes[arm] == 'Spark':
+                                command_stamp = clock.now().to_msg()
                                 URs.servoJ(arm, (angles[:6], 0.0, 0.0, ur_time, ur_lookahead_time, ur_gain))
                                 URs.get_gripper(arm).set(int(gripper*255))
+                                _publish_stable_spark_command(arm, pubs, command_stamp, angles, gripper)
                 
                 if control_modes[arm] == 'Optimization':
                     # print("Optimization")
@@ -278,6 +345,7 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize):
 
         # Always: ----------------------------------------------------------------------
         if publish_ft:
+            tick_stamp = clock.now().to_msg()
             norm_ft = URs.get_receive(arm).getActualTCPForce()
             pubs[arm+"_ft"].publish(Float32MultiArray(data=norm_ft))
             
@@ -301,8 +369,8 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize):
             
             saftey_mode = URs.get_receive(arm).getSafetyMode()
             pubs[arm+"_safety_mode"].publish(Int32(data=saftey_mode))
+            _publish_stable_robot_state(arm, pubs, tick_stamp, q, cartesian, norm_ft, gripper)
             # print(raw_ft)
-
 
 
 

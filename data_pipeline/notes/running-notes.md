@@ -221,3 +221,22 @@
   - reloaded dataset reported `2` episodes and `20` frames
   - the second conversion artifact recorded `dataset_episode_index = 1`
 - Inspected the emitted diagnostics and confirmed that raw-only RealSense depth topics still appear in `topic_diagnostics` with counts and observed rates even though they are not part of the published schema.
+
+### Runtime stamped-topic pass
+
+- Patched `TeleopSoftware/launch.py` and `TeleopSoftware/launch_helpers/run.py` so the existing live runtime now publishes the stable stamped robot-state topics directly:
+  - `/spark/{arm}/robot/joint_state`
+  - `/spark/{arm}/robot/eef_pose`
+  - `/spark/{arm}/robot/tcp_wrench`
+  - `/spark/{arm}/robot/gripper_state`
+- Those stamped state topics are emitted from the same control/update loop that already publishes the legacy unstamped topics, and they reuse a single `control_tick_time_v1` stamp per arm iteration.
+- Added stamped command publishing for the Spark joint-control path at the actual `servoJ`/gripper issue point:
+  - `/spark/{arm}/teleop/cmd_joint_state`
+  - `/spark/{arm}/teleop/cmd_gripper_state`
+- This keeps the pipeline consumer side decoupled from legacy topic schemas while giving the live runtime a real stable `/spark/...` surface.
+
+### Runtime scope caveat
+
+- The stable robot-state topics are now emitted continuously from the Teleop runtime loop.
+- The stable command topics are currently wired for the Spark joint-control path, because that is where the actual joint command vector and derived gripper command are available in this codebase.
+- Other control modes in `TeleopSoftware` still do not publish a V1-compatible joint-command topic, so the current `multisensor_20hz` action contract should still be treated as Spark-mode-first until those modes are either instrumented or split into a different published profile.
