@@ -189,3 +189,35 @@
   - CUDA available: `True`
   - device count: `2`
   - first device reported as `NVIDIA RTX A5500`
+
+### Offline converter implementation pass
+
+- Added `data_pipeline/convert_episode_bag_to_lerobot.py` as the first real raw-bag-to-LeRobot converter for the `multisensor_20hz` profile.
+- The converter reads one raw episode folder, loads the manifest and profile, forms the published 20 Hz time grid, aligns state and action with `latest_before`, aligns RGB image streams with `nearest`, and writes one episode into a LeRobot dataset under `published/<dataset_id>/`.
+- Conversion artifacts are written per episode under `published/<dataset_id>/meta/spark_conversion/<episode_id>/`:
+  - `diagnostics.json`
+  - `conversion_summary.json`
+  - `effective_profile.yaml`
+- Raw-only topics are still read for diagnostics, but only the published image topics are decoded into RGB frame payloads. This avoids coupling the converter to raw-only depth or derived topic encodings.
+- Existing LeRobot dataset feature sets are treated as immutable. If a later episode would change the published schema for the same `dataset_id`, conversion should fail rather than silently mutate the dataset contract.
+
+### Converter integration note
+
+- The current LeRobot `add_frame()` path rejects a caller-supplied `timestamp` field during frame validation even though the dataset stores a default timestamp column.
+- The converter therefore lets LeRobot synthesize the timestamp column from `frame_index / fps`, which still matches the fixed published 20 Hz grid declared in the spec.
+
+### Converter validation
+
+- `convert_episode_bag_to_lerobot.py` passed `py_compile` inside `.venv`.
+- Converted the tactile-inclusive dummy episode at `/tmp/pipeline_dummy_test_run/episode-test` into `published/dummy_multisensor_v1`:
+  - status: `pass`
+  - published frames: `10`
+  - selected image fields: wrist, scene, gelsight left, gelsight right
+- Converted an RGB-only dummy episode at `/tmp/pipeline_dummy_rgbonly/episode-rgbonly` into `published/dummy_multisensor_rgbonly_v1`:
+  - status: `pass`
+  - published frames: `10`
+  - selected image fields: wrist, scene
+- Validated dataset append by converting `/tmp/pipeline_dummy_append/episode-append-a` and `/tmp/pipeline_dummy_append/episode-append-b` into the same dataset root:
+  - reloaded dataset reported `2` episodes and `20` frames
+  - the second conversion artifact recorded `dataset_episode_index = 1`
+- Inspected the emitted diagnostics and confirmed that raw-only RealSense depth topics still appear in `topic_diagnostics` with counts and observed rates even though they are not part of the published schema.
