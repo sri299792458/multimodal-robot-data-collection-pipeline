@@ -134,3 +134,27 @@
 - `gelsight_bridge.py` imports and CLI parsing were validated under `/usr/bin/python3`.
 - Both launch files were syntax-checked and validated with `ros2 launch ... --show-args`.
 - The official `gsrobotics` camera helper imports `cv2.typing`, which is not available in the system OpenCV build here, so the ROS bridge uses a small local OpenCV capture wrapper while still reusing the official image-processing path.
+
+### Raw-layer implementation pass
+
+- Added `data_pipeline/pipeline_utils.py` for shared profile loading, topic selection, manifest writing, topic-type discovery, and sensor metadata helpers.
+- Added `data_pipeline/record_episode.py` as the first live recorder CLI. It resolves the `/spark/...` topic set from the profile, snapshots topic types, creates the raw episode folder, seeds `episode_manifest.json` and `notes.md`, and then runs `ros2 bag record`.
+- Added `data_pipeline/generate_dummy_episode.py` to write a synthetic rosbag plus matching manifest and notes in the same episode-folder shape expected by V1.
+- Added `data_pipeline/__init__.py` so the scripts can be imported as a package and still run directly from the repository checkout.
+
+### Raw-layer validation
+
+- `record_episode.py` and `generate_dummy_episode.py` both passed `py_compile` and CLI help validation under `/usr/bin/python3`.
+- `generate_dummy_episode.py` was run successfully against a temporary output root and produced:
+  - `bag/bag_0.db3`
+  - `bag/metadata.yaml`
+  - `episode_manifest.json`
+  - `notes.md`
+- `ros2 bag info` on the generated dummy bag showed the expected bimanual robot, command, RealSense, and optional GelSight topics with plausible message counts and timestamps.
+
+### Converter environment note
+
+- The system ROS Python runtime on this machine does not currently have `pandas`, `pyarrow`, `datasets`, or `torch`.
+- That means the next converter pass should either:
+  - run in a dedicated offline environment that has the LeRobot dataset stack installed, or
+  - start with a dependency-light alignment/diagnostics pass before wiring in final LeRobot export.
