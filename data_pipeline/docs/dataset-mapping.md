@@ -8,15 +8,62 @@ The raw bag preserves asynchronous truth.
 The published dataset is a fixed-rate aligned view of that raw data.
 
 
-## Published Profile
+## Published Profiles
 
-V1 publishes one profile:
+V1 should publish three profile shapes at `20 Hz`:
 
 - `multisensor_20hz`
+  - current bimanual profile
+- `multisensor_20hz_lightning`
+  - Lightning-only profile
+- `multisensor_20hz_thunder`
+  - Thunder-only profile
+
+Current implementation note:
+
+- the shipped default config file is still the bimanual `multisensor_20hz.yaml`
+- raw recording now resolves the matching profile from the detected active-arm set
+- conversion now defaults to the manifest-selected profile when `--profile` is omitted
 
 ### Why
 
 If GelSight is a first-class published modality, then 20 Hz is the most honest default common rate. A faster published rate would either duplicate tactile frames too aggressively or claim more temporal precision than the raw streams actually support.
+
+
+## Raw vs Published
+
+The raw bag may contain one active arm or two active arms.
+
+That does not mean all raw episodes should be coerced into one published schema.
+
+Rules:
+
+- raw recording should preserve whichever `/spark/...` robot topics are actually present
+- published conversion must choose a profile that matches the active embodiment
+- do not zero-fill the inactive arm into the bimanual profile by default
+- do not append episodes from different published profiles into the same `dataset_id`
+
+### Why
+
+The storage cost of zero-filling an inactive arm is small, but the semantic cost is not. It mixes single-arm and bimanual behavior into one schema and makes downstream training depend on implicit padding conventions instead of explicit embodiment choice.
+
+
+## Profile Selection
+
+For each raw episode:
+
+1. Inspect which arm-specific state and command topic sets are actually present and usable.
+2. Choose exactly one published profile:
+   - if both `lightning` and `thunder` have valid state and action streams, use `multisensor_20hz`
+   - if only `lightning` has a valid state and action stream, use `multisensor_20hz_lightning`
+   - if only `thunder` has a valid state and action stream, use `multisensor_20hz_thunder`
+3. Fail conversion if the arm presence is ambiguous or inconsistent.
+
+Examples of inconsistent episodes that should fail:
+
+- `lightning` state exists but `lightning` action does not
+- `thunder` action exists but `thunder` state does not
+- an arm comes and goes in a way that makes the published profile ambiguous for the episode
 
 
 ## Canonical Published Time Grid
@@ -63,14 +110,21 @@ For the bimanual setup, `multisensor_20hz` uses a fixed arm order:
 2. `thunder`
 
 That ordering must not change across episodes.
-This profile assumes both arms are present. If we later want a single-arm published dataset, that should be a separate profile rather than a partially filled version of this one.
+This profile is explicitly bimanual.
 
 Depth and other derived products remain available in the raw layer without burdening the first public dataset contract.
+
+For the single-arm profiles:
+
+- `multisensor_20hz_lightning` publishes only the Lightning low-dimensional state/action slice
+- `multisensor_20hz_thunder` publishes only the Thunder low-dimensional state/action slice
+- both keep the same image-field rules as the bimanual profile
+- both keep the real arm-specific field names instead of renaming to generic placeholders
 
 
 ## Observation State Definition
 
-V1 `observation.state` is a flat numeric vector built in this order:
+The current bimanual `multisensor_20hz` profile uses this flat `observation.state` order:
 
 ### `lightning`
 
@@ -123,7 +177,7 @@ This keeps all robot-side low-dimensional state in one compact feature, which is
 
 ## Action Definition
 
-V1 `action` is a flat numeric vector built in this order:
+The current bimanual `multisensor_20hz` profile uses this flat `action` order:
 
 ### `lightning`
 
@@ -148,6 +202,8 @@ V1 `action` is a flat numeric vector built in this order:
 ### Why
 
 The V1 action is the command sent by the teleoperation/runtime stack. This is more stable and more semantically honest than silently replacing action with a derived delta later in the pipeline.
+
+For the single-arm profiles, use the corresponding per-arm slice only.
 
 
 ## Per-Topic Alignment Rules

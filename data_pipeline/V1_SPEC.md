@@ -8,7 +8,7 @@ V1 is for:
 
 - recording demos
 - preserving raw ROS data
-- converting demos into one published LeRobot dataset
+- converting demos into published LeRobot datasets with fixed per-dataset schemas
 
 V1 is not for:
 
@@ -89,6 +89,7 @@ raw_episodes/
 - `dataset_id`
 - `task_name`
 - `robot_id`
+- `active_arms`
 - `operator`
 - `start_time_ns`
 - `end_time_ns`
@@ -162,14 +163,29 @@ Primary rule:
 An optional convenience topic like `/spark/robot_frame` can be added later, but it is not required for V1.
 
 
-## 11. Two-Arm Assumption
+## 11. Arm Presence
 
-The setup is bimanual.
+The hardware setup is bimanual, but an individual raw episode may be:
 
-V1 must assume:
+- `lightning` only
+- `thunder` only
+- `lightning` + `thunder`
 
-- `lightning` and `thunder` both exist
-- both arms may contribute state and command topics
+V1 raw recording must therefore:
+
+- tolerate one active arm or two active arms
+- preserve whichever stamped robot topics are actually present
+- record the active-arm set as episode metadata
+
+V1 published conversion must not zero-fill an inactive arm just to force all episodes into one dataset schema.
+
+Instead:
+
+- the current `multisensor_20hz` profile is the bimanual published profile
+- single-arm published profiles should be separate profiles:
+  - `multisensor_20hz_lightning`
+  - `multisensor_20hz_thunder`
+- a given `dataset_id` must contain episodes from exactly one published profile
 
 If both arms are published into `observation.state` or `action`, the mapping profile must define a fixed arm order.
 
@@ -215,10 +231,26 @@ If a device exposes richer hardware timestamps, those may be recorded as extra m
 
 ## 14. Published Dataset
 
-V1 publishes one aligned LeRobot profile:
+V1 publishes a small family of aligned LeRobot profiles, all at `20 Hz`:
 
 - `mapping_profile = multisensor_20hz`
-- `dataset_fps = 20`
+  - current bimanual profile
+- `mapping_profile = multisensor_20hz_lightning`
+  - planned Lightning-only profile
+- `mapping_profile = multisensor_20hz_thunder`
+  - planned Thunder-only profile
+
+Current implementation note:
+
+- the shipped default config file is still `multisensor_20hz.yaml`
+- raw recording now resolves the matching profile from the detected active-arm set
+- conversion now defaults to the manifest-selected profile when `--profile` is omitted
+
+Rules:
+
+- do not append episodes from different published profiles into the same `dataset_id`
+- raw bags may be recorded first and routed to the matching published profile later
+- published profile choice is an embodiment decision, not a storage optimization trick
 
 Why `20 Hz`:
 
@@ -237,6 +269,13 @@ Keep the V1 published schema small:
 - `observation.images.gelsight_right`
 
 Only include the GelSight image streams that actually exist in the recording setup.
+
+For arm state/action fields:
+
+- the bimanual `multisensor_20hz` profile contains both `lightning` and `thunder` slices in a fixed order
+- the single-arm profiles contain only the active arm slice
+- single-arm profiles should keep the real arm identity in field names rather than renaming to a generic `arm_*`
+- do not zero-fill an inactive arm into the bimanual schema by default
 
 Recommended `observation.state` contents:
 

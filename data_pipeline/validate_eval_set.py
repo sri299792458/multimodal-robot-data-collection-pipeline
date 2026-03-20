@@ -41,7 +41,7 @@ def dataset_snapshot(dataset_root: Path, dataset_id: str) -> dict[str, Any]:
         dataset.finalize()
 
 
-def generate_dummy_episode(raw_root: Path, profile: Path) -> Path:
+def generate_dummy_episode(raw_root: Path, profile: str | Path) -> Path:
     episode_id = "eval-dummy-tactile"
     episode_dir = raw_root / episode_id
     if episode_dir.exists():
@@ -67,16 +67,16 @@ def generate_dummy_episode(raw_root: Path, profile: Path) -> Path:
     return episode_dir
 
 
-def convert_episode(episode_dir: Path, published_root: Path, profile: Path) -> dict[str, Any]:
-    rc = convert_episode_main(
-        [
-            str(episode_dir),
-            "--profile",
-            str(profile),
-            "--published-root",
-            str(published_root),
-        ]
-    )
+def convert_episode(episode_dir: Path, published_root: Path, profile: str) -> dict[str, Any]:
+    cmd = [
+        str(episode_dir),
+        "--published-root",
+        str(published_root),
+    ]
+    if profile and profile != "auto":
+        cmd.extend(["--profile", str(profile)])
+
+    rc = convert_episode_main(cmd)
     if rc != 0:
         raise RuntimeError(f"Episode conversion failed with exit code {rc} for {episode_dir}")
 
@@ -96,7 +96,7 @@ def evaluate_episode(
     label: str,
     episode_dir: Path,
     published_root: Path,
-    profile: Path,
+    profile: str,
 ) -> dict[str, Any]:
     try:
         result = convert_episode(episode_dir, published_root, profile)
@@ -118,7 +118,7 @@ def evaluate_episode(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE_PATH)
+    parser.add_argument("--profile", default="auto")
     parser.add_argument("--work-root", type=Path, default=Path("/tmp/pipeline_eval"))
     parser.add_argument("--real-episode", type=Path, action="append", default=[])
     parser.add_argument("--skip-dummy", action="store_true")
@@ -146,13 +146,14 @@ def main(argv: list[str] | None = None) -> int:
     entries: list[dict[str, Any]] = []
 
     if not args.skip_dummy:
-        dummy_episode_dir = generate_dummy_episode(raw_root, args.profile)
+        dummy_profile = args.profile if args.profile != "auto" else str(DEFAULT_PROFILE_PATH)
+        dummy_episode_dir = generate_dummy_episode(raw_root, dummy_profile)
         entries.append(
             evaluate_episode(
                 label="dummy",
                 episode_dir=dummy_episode_dir,
                 published_root=published_root,
-                profile=args.profile,
+                profile=str(dummy_profile),
             )
         )
 
@@ -163,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
                 label=f"real_{index}",
                 episode_dir=episode_dir,
                 published_root=published_root,
-                profile=args.profile,
+                profile=str(args.profile),
             )
         )
 

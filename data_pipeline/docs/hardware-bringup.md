@@ -5,6 +5,39 @@ This is the step-by-step sequence for the first real capture run with the curren
 Use separate terminals. For ROS-facing processes, prefer system ROS Jazzy and `/usr/bin/python3`, not Conda Python.
 
 
+## Embodiment Decision
+
+Before you record, decide which embodiment this episode belongs to:
+
+- `lightning` only
+- `thunder` only
+- `lightning` + `thunder`
+
+Recommended metadata naming:
+
+- Lightning-only:
+  - `dataset_id = spark_multisensor_lightning_v1`
+  - `robot_id = spark_lightning`
+- Thunder-only:
+  - `dataset_id = spark_multisensor_thunder_v1`
+  - `robot_id = spark_thunder`
+- Bimanual:
+  - `dataset_id = spark_multisensor_bimanual_v1`
+  - `robot_id = spark_bimanual`
+
+Why:
+
+- raw bags may be recorded with one active arm or both
+- published LeRobot datasets should stay profile-homogeneous
+- single-arm and bimanual episodes should not be appended into the same published dataset
+
+Current implementation note:
+
+- the shipped default config file `data_pipeline/configs/multisensor_20hz.yaml` is still the bimanual profile
+- the recorder now probes active robot-state topics and stamps the matching published profile into the raw manifest
+- the converter now defaults to the manifest-selected profile when `--profile` is omitted
+
+
 ## 0. One-Time Setup
 
 Run these once from the repository root:
@@ -205,15 +238,21 @@ Before recording, run the recorder dry-run:
 ```bash
 source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id spark_multisensor_v1 \
+  --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
-  --robot-id spark_bimanual \
+  --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --sensors-file data_pipeline/configs/sensors.local.yaml \
   --dry-run
 ```
 
 This should print the selected topic list and should not fail with `Missing required topics`.
+
+The dry-run output now also prints:
+
+- `active_arms=...`
+- `mapping_profile=...`
+- `profile_path=...`
 
 
 ## 8. Record One Short Real Episode
@@ -223,9 +262,9 @@ Do one short smoke-test recording before collecting anything longer:
 ```bash
 source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id spark_multisensor_v1 \
+  --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
-  --robot-id spark_bimanual \
+  --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --sensors-file data_pipeline/configs/sensors.local.yaml
 ```

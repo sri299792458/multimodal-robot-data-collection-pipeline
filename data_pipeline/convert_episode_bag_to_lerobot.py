@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from data_pipeline.pipeline_utils import DEFAULT_PROFILE_PATH, load_profile, write_json  # noqa: E402
+from data_pipeline.pipeline_utils import load_profile, normalize_active_arms, profile_required_arms, write_json  # noqa: E402
 from lerobot.datasets.lerobot_dataset import LeRobotDataset  # noqa: E402
 
 
@@ -638,7 +638,7 @@ def write_conversion_artifacts(
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("episode_dir", type=Path)
-    parser.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
+    parser.add_argument("--profile", default="")
     parser.add_argument("--published-root", type=Path, default=REPO_ROOT / "published")
     parser.add_argument("--vcodec", default="auto")
     parser.add_argument("--skip-validate-load", action="store_true")
@@ -658,11 +658,20 @@ def main(argv: list[str] | None = None) -> int:
         raise FileNotFoundError(f"Missing bag directory: {bag_dir}")
 
     manifest = read_manifest(manifest_path)
-    profile = load_profile(args.profile)
+    profile_ref = args.profile or manifest["mapping_profile"]
+    profile = load_profile(profile_ref)
     if manifest["mapping_profile"] != profile["profile_name"]:
         raise RuntimeError(
             f"Manifest mapping_profile={manifest['mapping_profile']} does not match profile {profile['profile_name']}"
         )
+    manifest_active_arms = manifest.get("active_arms")
+    if manifest_active_arms:
+        normalized_manifest_arms = normalize_active_arms(manifest_active_arms)
+        normalized_profile_arms = profile_required_arms(profile)
+        if normalized_manifest_arms != normalized_profile_arms:
+            raise RuntimeError(
+                f"Manifest active_arms {normalized_manifest_arms} do not match profile arms {normalized_profile_arms}"
+            )
 
     all_topics_to_read = set(manifest["topics"])
     topic_types = manifest.get("topic_types", {})

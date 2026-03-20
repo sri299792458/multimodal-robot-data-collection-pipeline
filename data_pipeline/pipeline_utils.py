@@ -16,8 +16,20 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CONFIGS_DIR = REPO_ROOT / "data_pipeline" / "configs"
 DEFAULT_PROFILE_PATH = REPO_ROOT / "data_pipeline" / "configs" / "multisensor_20hz.yaml"
 DEFAULT_RAW_EPISODES_DIR = REPO_ROOT / "raw_episodes"
+ARM_ORDER = ("lightning", "thunder")
+PROFILE_NAME_TO_PATH = {
+    "multisensor_20hz": CONFIGS_DIR / "multisensor_20hz.yaml",
+    "multisensor_20hz_lightning": CONFIGS_DIR / "multisensor_20hz_lightning.yaml",
+    "multisensor_20hz_thunder": CONFIGS_DIR / "multisensor_20hz_thunder.yaml",
+}
+ACTIVE_ARMS_TO_PROFILE_NAME = {
+    ("lightning", "thunder"): "multisensor_20hz",
+    ("lightning",): "multisensor_20hz_lightning",
+    ("thunder",): "multisensor_20hz_thunder",
+}
 
 _TOPIC_TYPE_PATTERN = re.compile(r"^(?P<topic>/\S+)\s+\[(?P<type>[^\]]+)\]\s*$")
 
@@ -30,8 +42,102 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     return data
 
 
+def profile_path_for_name(profile_name: str) -> Path:
+    if profile_name in PROFILE_NAME_TO_PATH:
+        return PROFILE_NAME_TO_PATH[profile_name]
+    return CONFIGS_DIR / f"{profile_name}.yaml"
+
+
 def load_profile(path: str | Path = DEFAULT_PROFILE_PATH) -> dict[str, Any]:
-    return load_yaml(path)
+    path_str = str(path)
+    candidate = Path(path_str)
+    if candidate.exists():
+        return load_yaml(candidate)
+    return load_yaml(profile_path_for_name(path_str))
+
+
+def normalize_active_arms(active_arms: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    normalized = {
+        str(arm).strip().lower()
+        for arm in active_arms
+        if str(arm).strip()
+    }
+    invalid = sorted(normalized.difference(ARM_ORDER))
+    if invalid:
+        raise ValueError(f"Unsupported arm names: {invalid}")
+    return [arm for arm in ARM_ORDER if arm in normalized]
+
+
+def profile_required_arms(profile: dict[str, Any]) -> list[str]:
+    notes_required = profile.get("notes", {}).get("required_arms")
+    if isinstance(notes_required, list) and notes_required:
+        return normalize_active_arms(notes_required)
+
+    arm_sources = set(profile.get("published", {}).get("observation_state", {}).get("sources", {}))
+    arm_sources.update(profile.get("published", {}).get("action", {}).get("sources", {}))
+    return normalize_active_arms(arm_sources)
+
+
+def topic_has_message(topic: str, timeout_s: float = 1.5) -> bool:
+    try:
+        result = subprocess.run(
+            ["ros2", "topic", "echo", "--once", topic],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0
+
+
+def infer_active_arms(live_topics: dict[str, str], probe_timeout_s: float = 1.5) -> list[str]:
+    active_arms: list[str] = []
+    for arm in ARM_ORDER:
+        topic = f"/spark/{arm}/robot/joint_state"
+        if topic not in live_topics:
+            continue
+        if topic_has_message(topic, timeout_s=probe_timeout_s):
+            active_arms.append(arm)
+    return active_arms
+
+
+def resolve_profile_for_active_arms(
+    profile_ref: str | Path | None,
+    active_arms: list[str] | tuple[str, ...] | set[str],
+) -> tuple[dict[str, Any], Path]:
+    normalized_arms = normalize_active_arms(active_arms)
+    if not normalized_arms:
+        raise RuntimeError("No active arms detected. Cannot resolve a published profile.")
+
+    resolved_profile_name = ACTIVE_ARMS_TO_PROFILE_NAME.get(tuple(normalized_arms))
+    if resolved_profile_name is None:
+        raise RuntimeError(f"Unsupported active-arm combination: {normalized_arms}")
+
+    if profile_ref in {None, "", "auto"}:
+        resolved_path = profile_path_for_name(resolved_profile_name)
+        return load_profile(resolved_path), resolved_path
+
+    requested_profile = load_profile(profile_ref)
+    requested_candidate_path = Path(str(profile_ref))
+    requested_path = (
+        requested_candidate_path
+        if requested_candidate_path.exists()
+        else profile_path_for_name(str(profile_ref))
+    )
+    requested_arms = profile_required_arms(requested_profile)
+    if requested_arms == normalized_arms:
+        return requested_profile, requested_path
+
+    if requested_profile.get("profile_name") == DEFAULT_PROFILE_PATH.stem:
+        resolved_path = profile_path_for_name(resolved_profile_name)
+        return load_profile(resolved_path), resolved_path
+
+    raise RuntimeError(
+        f"Requested profile {requested_profile.get('profile_name')} expects arms {requested_arms}, "
+        f"but active arms are {normalized_arms}"
+    )
 
 
 def collect_candidate_topics(profile: dict[str, Any]) -> list[str]:
@@ -240,6 +346,7 @@ def build_notes_template(manifest: dict[str, Any]) -> str:
         f"- dataset_id: {manifest['dataset_id']}",
         f"- task_name: {manifest['task_name']}",
         f"- robot_id: {manifest['robot_id']}",
+        f"- active_arms: {', '.join(manifest.get('active_arms', [])) or 'unknown'}",
         f"- operator: {manifest['operator']}",
         f"- mapping_profile: {manifest['mapping_profile']}",
         f"- clock_policy: {manifest['clock_policy']}",

@@ -249,6 +249,51 @@
   - the second conversion artifact recorded `dataset_episode_index = 1`
 - Inspected the emitted diagnostics and confirmed that raw-only RealSense depth topics still appear in `topic_diagnostics` with counts and observed rates even though they are not part of the published schema.
 
+## 2026-03-20
+
+### Single-arm vs bimanual profile decision
+
+- Hardware bring-up made the profile boundary concrete: the raw capture path should tolerate either one active arm or two active arms, but the published LeRobot datasets should remain embodiment-specific.
+- Rejected the idea of zero-filling the inactive arm into the bimanual schema by default. The storage overhead would be tiny, but the semantic cost would be high because it would mix single-arm and bimanual behavior in one dataset contract.
+- Locked in the intended published split:
+  - `multisensor_20hz`
+    - current bimanual profile
+  - `multisensor_20hz_lightning`
+    - planned Lightning-only profile
+  - `multisensor_20hz_thunder`
+    - planned Thunder-only profile
+- Added the corresponding documentation rule: one `dataset_id` should contain episodes from exactly one published profile.
+- Preserved the current bimanual `multisensor_20hz.yaml` config, but documented that it should now be treated explicitly as the bimanual published profile rather than the universal raw-capture shape.
+
+### Implementation consequence
+
+- The next pipeline change should separate raw-capture topic selection from published-profile selection.
+- Raw recording should record the available `/spark/...` topic surface and store active-arm metadata.
+- Published conversion should choose the matching embodiment profile and write into the corresponding dataset instead of padding into a larger schema.
+
+### Profile-split implementation pass
+
+- Added `data_pipeline/configs/multisensor_20hz_lightning.yaml` and `data_pipeline/configs/multisensor_20hz_thunder.yaml` as the single-arm published profiles alongside the existing bimanual `multisensor_20hz.yaml`.
+- Extended `data_pipeline/pipeline_utils.py` with active-arm normalization, active-arm probing from live `/spark/{arm}/robot/joint_state` messages, and published-profile resolution based on the detected embodiment.
+- Updated `data_pipeline/record_episode.py` so `--active-arms auto` now probes which robot-state topics are actually producing messages, resolves the matching published profile, and records `active_arms` plus the selected `mapping_profile` in the raw manifest.
+- Updated `data_pipeline/convert_episode_bag_to_lerobot.py` so omitting `--profile` now means "use the manifest-selected profile", and conversion validates `active_arms` against the loaded profile instead of assuming the bimanual default.
+- Updated `data_pipeline/generate_dummy_episode.py` so dummy bags honor the selected profile's active arms, which keeps eval and schema validation meaningful for both single-arm and bimanual cases.
+- Updated `data_pipeline/validate_eval_set.py` so real-episode validation can use the manifest-selected profile automatically instead of forcing the bimanual default.
+
+### Validation
+
+- `py_compile` passed for:
+  - `pipeline_utils.py`
+  - `record_episode.py`
+  - `convert_episode_bag_to_lerobot.py`
+  - `generate_dummy_episode.py`
+  - `validate_eval_set.py`
+- Re-ran dummy conversion for the bimanual profile:
+  - dataset feature shapes remained `observation.state=(38,)`, `action=(14,)`
+- Ran a Lightning-only dummy conversion without passing `--profile` to the converter:
+  - manifest recorded `mapping_profile=multisensor_20hz_lightning`
+  - dataset feature shapes were `observation.state=(19,)`, `action=(7,)`
+
 ### Runtime stamped-topic pass
 
 - Patched `TeleopSoftware/launch.py` and `TeleopSoftware/launch_helpers/run.py` so the existing live runtime now publishes the stable stamped robot-state topics directly:

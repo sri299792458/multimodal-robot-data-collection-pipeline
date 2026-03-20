@@ -16,19 +16,20 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from data_pipeline.pipeline_utils import (
-    DEFAULT_PROFILE_PATH,
     DEFAULT_RAW_EPISODES_DIR,
     build_notes_template,
     collect_candidate_topics,
     get_git_commit,
+    infer_active_arms,
     infer_sensor_metadata,
     list_live_topics,
     load_optional_sensor_overrides,
-    load_profile,
     make_episode_id,
+    normalize_active_arms,
     now_ns,
     parse_task_list,
     required_topics_from_profile,
+    resolve_profile_for_active_arms,
     write_json,
 )
 
@@ -39,7 +40,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task-name", required=True)
     parser.add_argument("--robot-id", required=True)
     parser.add_argument("--operator", required=True)
-    parser.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
+    parser.add_argument("--profile", default="auto")
     parser.add_argument("--raw-root", default=str(DEFAULT_RAW_EPISODES_DIR))
     parser.add_argument("--episode-id", default="")
     parser.add_argument("--storage-id", default="sqlite3")
@@ -47,6 +48,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--notes", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--extra-topics", default="")
+    parser.add_argument("--active-arms", default="auto")
     return parser
 
 
@@ -69,6 +71,7 @@ def select_topics(profile: dict, live_topics: dict[str, str], extra_topics: list
 def build_manifest(
     args: argparse.Namespace,
     profile: dict,
+    active_arms: list[str],
     selected_topics: list[str],
     live_topics: dict[str, str],
     sensor_overrides: dict[str, dict],
@@ -85,6 +88,7 @@ def build_manifest(
         "dataset_id": args.dataset_id,
         "task_name": args.task_name,
         "robot_id": args.robot_id,
+        "active_arms": active_arms,
         "operator": args.operator,
         "start_time_ns": start_time_ns,
         "end_time_ns": end_time_ns,
@@ -118,17 +122,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
-    profile = load_profile(args.profile)
     raw_root = Path(args.raw_root)
     args.episode_id = args.episode_id or make_episode_id()
     sensor_overrides = load_optional_sensor_overrides(args.sensors_file)
     extra_topics = parse_task_list(args.extra_topics)
 
     live_topics = list_live_topics()
+    if str(args.active_arms).strip().lower() == "auto":
+        active_arms = infer_active_arms(live_topics)
+    else:
+        active_arms = normalize_active_arms(parse_task_list(args.active_arms))
+    profile, resolved_profile_path = resolve_profile_for_active_arms(args.profile, active_arms)
     selected_topics, _ = select_topics(profile, live_topics, extra_topics)
 
     if args.dry_run:
         print(f"episode_id={args.episode_id}")
+        print(f"active_arms={','.join(active_arms)}")
+        print(f"mapping_profile={profile['profile_name']}")
+        print(f"profile_path={resolved_profile_path}")
         print(f"bag_topics={len(selected_topics)}")
         for topic in selected_topics:
             print(f"{topic} [{live_topics[topic]}]")
@@ -143,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest = build_manifest(
         args=args,
         profile=profile,
+        active_arms=active_arms,
         selected_topics=selected_topics,
         live_topics=live_topics,
         sensor_overrides=sensor_overrides,
@@ -168,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     final_manifest = build_manifest(
         args=args,
         profile=profile,
+        active_arms=active_arms,
         selected_topics=selected_topics,
         live_topics=live_topics,
         sensor_overrides=sensor_overrides,

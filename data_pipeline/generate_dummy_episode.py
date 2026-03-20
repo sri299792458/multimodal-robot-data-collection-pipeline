@@ -23,9 +23,11 @@ from data_pipeline.pipeline_utils import (  # noqa: E402
     DEFAULT_PROFILE_PATH,
     DEFAULT_RAW_EPISODES_DIR,
     build_notes_template,
+    collect_candidate_topics,
     load_profile,
     make_episode_id,
     now_ns,
+    profile_required_arms,
     write_json,
 )
 
@@ -72,8 +74,8 @@ def stamp_from_ns(msg, stamp_ns: int) -> None:
 
 
 def make_color_image(stamp_ns: int, width: int, height: int, phase: float) -> Image:
-    x = np.linspace(0, 255, width, dtype=np.uint8)
-    y = np.linspace(0, 255, height, dtype=np.uint8)
+    x = np.linspace(0, 255, width, dtype=np.int32)
+    y = np.linspace(0, 255, height, dtype=np.int32)
     xv, yv = np.meshgrid(x, y)
     image = np.stack(
         [
@@ -158,7 +160,8 @@ def create_topic(writer: rosbag2_py.SequentialWriter, topic_id: int, name: str, 
 
 
 def build_manifest(args: argparse.Namespace, profile: dict, episode_id: str, start_ns: int, end_ns: int) -> dict:
-    topics = list(TOPIC_TYPES)
+    active_arms = profile_required_arms(profile)
+    topics = [topic for topic in collect_candidate_topics(profile) if topic in TOPIC_TYPES]
     if not args.include_tactile:
         topics = [topic for topic in topics if "/spark/tactile/" not in topic]
 
@@ -229,6 +232,7 @@ def build_manifest(args: argparse.Namespace, profile: dict, episode_id: str, sta
         "dataset_id": args.dataset_id,
         "task_name": args.task_name,
         "robot_id": args.robot_id,
+        "active_arms": active_arms,
         "operator": args.operator,
         "start_time_ns": start_ns,
         "end_time_ns": end_ns,
@@ -247,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     profile = load_profile(args.profile)
+    active_arms = profile_required_arms(profile)
     raw_root = Path(args.raw_root)
     episode_id = args.episode_id or make_episode_id()
     episode_dir = raw_root / episode_id
@@ -258,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     writer = rosbag2_py.SequentialWriter()
     writer.open(storage_options, converter_options)
 
-    topics = list(TOPIC_TYPES)
+    topics = [topic for topic in collect_candidate_topics(profile) if topic in TOPIC_TYPES]
     if not args.include_tactile:
         topics = [topic for topic in topics if "/spark/tactile/" not in topic]
     for topic_id, topic in enumerate(topics):
@@ -310,76 +315,78 @@ def main(argv: list[str] | None = None) -> int:
 
     for stamp_ns in range(start_ns, end_ns, state_period_ns):
         phase = (stamp_ns - start_ns) / 1_000_000_000
-        lightning_joints = [0.2 * math.sin(phase + idx * 0.2) for idx in range(6)]
-        thunder_joints = [0.25 * math.cos(phase + idx * 0.2) for idx in range(6)]
+        if "lightning" in active_arms:
+            lightning_joints = [0.2 * math.sin(phase + idx * 0.2) for idx in range(6)]
+            writer.write(
+                "/spark/lightning/robot/joint_state",
+                serialize_message(make_joint_state(stamp_ns, joint_names, lightning_joints)),
+                stamp_ns,
+            )
+            writer.write(
+                "/spark/lightning/robot/eef_pose",
+                serialize_message(make_pose(stamp_ns, phase, arm_sign=1.0)),
+                stamp_ns,
+            )
+            writer.write(
+                "/spark/lightning/robot/tcp_wrench",
+                serialize_message(make_wrench(stamp_ns, phase, arm_sign=1.0)),
+                stamp_ns,
+            )
+            writer.write(
+                "/spark/lightning/robot/gripper_state",
+                serialize_message(make_joint_state(stamp_ns, ["gripper"], [0.5 + 0.2 * math.sin(phase)])),
+                stamp_ns,
+            )
 
-        writer.write(
-            "/spark/lightning/robot/joint_state",
-            serialize_message(make_joint_state(stamp_ns, joint_names, lightning_joints)),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/lightning/robot/eef_pose",
-            serialize_message(make_pose(stamp_ns, phase, arm_sign=1.0)),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/lightning/robot/tcp_wrench",
-            serialize_message(make_wrench(stamp_ns, phase, arm_sign=1.0)),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/lightning/robot/gripper_state",
-            serialize_message(make_joint_state(stamp_ns, ["gripper"], [0.5 + 0.2 * math.sin(phase)])),
-            stamp_ns,
-        )
-
-        writer.write(
-            "/spark/thunder/robot/joint_state",
-            serialize_message(make_joint_state(stamp_ns, joint_names, thunder_joints)),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/thunder/robot/eef_pose",
-            serialize_message(make_pose(stamp_ns, phase, arm_sign=-1.0)),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/thunder/robot/tcp_wrench",
-            serialize_message(make_wrench(stamp_ns, phase, arm_sign=-1.0)),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/thunder/robot/gripper_state",
-            serialize_message(make_joint_state(stamp_ns, ["gripper"], [0.45 + 0.15 * math.cos(phase)])),
-            stamp_ns,
-        )
+        if "thunder" in active_arms:
+            thunder_joints = [0.25 * math.cos(phase + idx * 0.2) for idx in range(6)]
+            writer.write(
+                "/spark/thunder/robot/joint_state",
+                serialize_message(make_joint_state(stamp_ns, joint_names, thunder_joints)),
+                stamp_ns,
+            )
+            writer.write(
+                "/spark/thunder/robot/eef_pose",
+                serialize_message(make_pose(stamp_ns, phase, arm_sign=-1.0)),
+                stamp_ns,
+            )
+            writer.write(
+                "/spark/thunder/robot/tcp_wrench",
+                serialize_message(make_wrench(stamp_ns, phase, arm_sign=-1.0)),
+                stamp_ns,
+            )
+            writer.write(
+                "/spark/thunder/robot/gripper_state",
+                serialize_message(make_joint_state(stamp_ns, ["gripper"], [0.45 + 0.15 * math.cos(phase)])),
+                stamp_ns,
+            )
 
     for stamp_ns in range(start_ns, end_ns, action_period_ns):
         phase = (stamp_ns - start_ns) / 1_000_000_000
-        lightning_cmd = [0.3 * math.sin(phase + idx * 0.15) for idx in range(6)]
-        thunder_cmd = [0.3 * math.cos(phase + idx * 0.15) for idx in range(6)]
-
-        writer.write(
-            "/spark/lightning/teleop/cmd_joint_state",
-            serialize_message(make_joint_state(stamp_ns, joint_names, lightning_cmd)),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/lightning/teleop/cmd_gripper_state",
-            serialize_message(make_joint_state(stamp_ns, ["gripper_cmd"], [0.4 + 0.25 * math.sin(phase)])),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/thunder/teleop/cmd_joint_state",
-            serialize_message(make_joint_state(stamp_ns, joint_names, thunder_cmd)),
-            stamp_ns,
-        )
-        writer.write(
-            "/spark/thunder/teleop/cmd_gripper_state",
-            serialize_message(make_joint_state(stamp_ns, ["gripper_cmd"], [0.55 + 0.2 * math.cos(phase)])),
-            stamp_ns,
-        )
+        if "lightning" in active_arms:
+            lightning_cmd = [0.3 * math.sin(phase + idx * 0.15) for idx in range(6)]
+            writer.write(
+                "/spark/lightning/teleop/cmd_joint_state",
+                serialize_message(make_joint_state(stamp_ns, joint_names, lightning_cmd)),
+                stamp_ns,
+            )
+            writer.write(
+                "/spark/lightning/teleop/cmd_gripper_state",
+                serialize_message(make_joint_state(stamp_ns, ["gripper_cmd"], [0.4 + 0.25 * math.sin(phase)])),
+                stamp_ns,
+            )
+        if "thunder" in active_arms:
+            thunder_cmd = [0.3 * math.cos(phase + idx * 0.15) for idx in range(6)]
+            writer.write(
+                "/spark/thunder/teleop/cmd_joint_state",
+                serialize_message(make_joint_state(stamp_ns, joint_names, thunder_cmd)),
+                stamp_ns,
+            )
+            writer.write(
+                "/spark/thunder/teleop/cmd_gripper_state",
+                serialize_message(make_joint_state(stamp_ns, ["gripper_cmd"], [0.55 + 0.2 * math.cos(phase)])),
+                stamp_ns,
+            )
 
     writer.close()
 
