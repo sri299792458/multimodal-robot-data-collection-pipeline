@@ -540,3 +540,74 @@
 - `task_name` remains the stable internal task identifier.
 - During conversion, published LeRobot `task` now prefers `language_instruction` and falls back to `task_name` if no instruction was supplied.
 - This keeps the change low-complexity while preserving a clean path for future language-conditioned training.
+
+### March 20 hardware bring-up and first real episode
+
+- Brought up a real Lightning-only hardware stack successfully with:
+  - `TeleopSoftware/launch_devs.py`
+  - `TeleopSoftware/launch.py`
+  - `data_pipeline/launch/realsense_contract.launch.py`
+- Live dry-run succeeded once the active camera serials were corrected for the current session:
+  - wrist camera: D405 `130322273305`
+  - scene camera: D455 `213622251272`
+- The first real raw episode recorded successfully:
+  - `raw_episodes/episode-20260320-110232`
+  - `dataset_id=spark_multisensor_lightning_v1`
+  - `mapping_profile=multisensor_20hz_lightning`
+  - duration about `49s`
+  - bag size about `4.2 GiB`
+- Bag review showed the core arm trajectory data was healthy:
+  - both RGB and depth streams recorded for wrist and scene cameras at about 30 Hz
+  - robot state recorded at about 121 Hz
+  - teleop joint command stream recorded at about 28 Hz
+- Bag review also exposed a real gripper problem:
+  - `/spark/lightning/teleop/cmd_gripper_state` stayed constant at `1.0`
+  - `/spark/lightning/robot/gripper_state` stayed constant at `228.0`
+  - joint motion was still present, so the problem was isolated to the gripper path
+- Root cause was a Lightning trigger calibration mismatch in `TeleopSoftware/launch_helpers/run.py`.
+  - The current pipeline copy was using the wrong Lightning Spark trigger mapping range.
+  - Updated Lightning gripper calibration to match `SPARK-Remote`:
+    - `in_min=-0.4`
+    - `in_max=0.25`
+- Found one additional remaining hardware-tuning mismatch against `SPARK-Remote` and corrected it:
+  - updated `LIGHTNING_OFFSET` in `TeleopSoftware/launch_helpers/run.py` to the tested branch values
+- Left the hardcoded `enable_topic = 'lightning_spark_enable'` unchanged for now because the current setup uses a single foot pedal wired through Lightning.
+
+### Real episode conversion and local LeRobot visualizer
+
+- Converted the first real raw episode to LeRobot format:
+  - input: `raw_episodes/episode-20260320-110232`
+  - output: `published/spark_multisensor_lightning_v1`
+  - converter reported:
+    - `episode_index=0`
+    - `status=truncated_tail`
+    - `published_frames=898`
+- Verified the published dataset layout is LeRobot `v3.0` compatible:
+  - `meta/info.json`
+  - `meta/episodes/chunk-000/...`
+  - `data/chunk-000/file-000.parquet`
+  - `videos/observation.images.wrist/...`
+  - `videos/observation.images.scene/...`
+- Cloned the official browser visualizer repo locally:
+  - `lerobot-dataset-visualizer`
+- Found a real local-viewer bug during bring-up:
+  - the client-side browser code ignored `DATASET_URL`
+  - it fell back to `https://huggingface.co/datasets/...`
+  - for the local dataset path `local/spark_multisensor_lightning_v1`, this produced a `401`
+- Verified the failure directly with Playwright using the system Chrome:
+  - the failing request was:
+    - `https://huggingface.co/datasets/local/spark_multisensor_lightning_v1/resolve/main/meta/info.json`
+- Patched `lerobot-dataset-visualizer/src/utils/versionUtils.ts` locally so browser-side fetches use a public/same-origin dataset base instead of silently falling back to Hugging Face.
+- Rebuilt the visualizer and re-verified with Playwright:
+  - the dataset page now loads successfully
+  - both wrist and scene videos render
+  - language instruction renders
+  - charts render
+  - remaining 404s are only optional progress files:
+    - `sarm_progress.parquet`
+    - `srm_progress.parquet`
+- Verified working viewer URL for this machine context:
+  - `http://10.33.55.65:3000/local/spark_multisensor_lightning_v1/episode_0`
+- Important operational note:
+  - for this IDE/browser environment, `localhost:3000` is not the reliable access path
+  - use the machine IP URL above instead

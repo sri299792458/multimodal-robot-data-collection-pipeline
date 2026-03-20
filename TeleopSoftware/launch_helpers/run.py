@@ -32,12 +32,12 @@ THUNDER_OFFSET = [
     0.0,
 ]
 LIGHTNING_OFFSET = [
-    -1.0215797424316406,
-    -4.490872740745544,
-    -1.4827108010649681,
-    -0.588315486907959,
-    -0.5356001891195774,
-    2.0629922747612,
+    -1.06043816,
+    -4.28556144,
+    -1.23235792,
+    -1.21208322,
+    -0.60609466,
+    1.96014991,
     0.0,
 ]
 
@@ -140,7 +140,7 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize, clock):
                     
                 angles = [angle + homes[arm][i] for i, angle in enumerate(angles)]
                 if arm == "Lightning":
-                    gripper = map_value(angles[6], in_min=-4.8, in_max=-2.3, out_min=0, out_max=1)
+                    gripper = map_value(angles[6], in_min=-0.4, in_max=0.25, out_min=0, out_max=1)
                 else:
                     gripper = map_value(angles[6], in_min=-2.71, in_max=-1.26, out_min=0, out_max=1)
                 gripper = np.clip(gripper, 0, 1)
