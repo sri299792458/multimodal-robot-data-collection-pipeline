@@ -1,10 +1,8 @@
 import os
-import json
 import subprocess
 import sys
 import time
 import atexit
-import serial
 # import rospy
 import rclpy
 from rclpy.node import Node
@@ -52,26 +50,6 @@ class LaunchDevs(Node):
             module.kill()
         print("Exiting")
 
-    def probe_spark_id(self, dev):
-        try:
-            con = serial.Serial(dev, 921600, timeout=2.0)
-            try:
-                time.sleep(0.5) # Ignore bootloader messages
-                con.reset_input_buffer()
-                con.reset_output_buffer()
-                payload = con.read_until(b'\x00')[:-1]
-                if not payload:
-                    raise RuntimeError("no JSON payload received")
-                data = json.loads(payload.decode('utf-8'))
-                device_id = str(data['ID']).strip().lower()
-                print(f"Spark probe: {dev} -> {device_id}")
-                return device_id
-            finally:
-                con.close()
-        except Exception as exc:
-            print(f"Spark probe failed on {dev}: {exc}")
-            return None
-
     def StartModules(self, Spark_devs, SM_devs, VR_devs, haptic_devs):
         print("Starting modules---------------------")
         # modules = [subprocess.Popen(['roscore'], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)]
@@ -87,24 +65,9 @@ class LaunchDevs(Node):
         # modules.append(subprocess.Popen(['python3', os.path.join(path, 'Spark/SparkNode_buffer.py')], start_new_session=True))
 
         modules = []
-        spark_launch_devs = []
-        seen_ids = {}
-        for dev in sorted(Spark_devs):
-            device_id = self.probe_spark_id(dev)
-            if device_id is None:
-                spark_launch_devs.append(dev)
-                continue
-            if device_id in seen_ids:
-                print(
-                    f"Duplicate Spark firmware ID '{device_id}' detected on {seen_ids[device_id]} and {dev}. "
-                    "Skipping the duplicate device. Reflash the Spark firmware with distinct IDs."
-                )
-                continue
-            seen_ids[device_id] = dev
-            spark_launch_devs.append(dev)
         for vr in VR_devs:
             modules.append(subprocess.Popen([python_exe, 'VR/VR_Node.py'], start_new_session=True))
-        for dev in spark_launch_devs:
+        for dev in Spark_devs:
             # modules.append(subprocess.Popen(['python3', os.path.join(path, 'Spark/SparkNode.py'), dev, "False"], start_new_session=True)) # Pub to latency buffer
             modules.append(subprocess.Popen([python_exe, os.path.join(path, 'Spark/SparkNode.py'), dev], start_new_session=True)) # Pub to latency buffer
         for dev in SM_devs:

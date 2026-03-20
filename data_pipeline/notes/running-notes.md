@@ -640,3 +640,17 @@
   - refuses to launch duplicate firmware IDs silently
   - prints an explicit reflash message instead of allowing GUI flicker/corruption
 - Also fixed `launch_devs.py` to spawn child processes with `sys.executable` instead of plain `python3`, so it stays on the intended interpreter.
+
+### SPARK firmware now fixed on hardware
+
+- Verified directly from raw serial JSON that both physical SPARK boards were initially reporting `ID=lightning`.
+- Flashed the physical SPARK boards into a known symmetric state:
+  - `/dev/ttyUSB0` -> `lightning`
+  - `/dev/ttyUSB1` -> `thunder`
+- Re-verified from raw serial JSON after flashing:
+  - both boards report all encoder `status` bits as `true`
+  - the firmware IDs are now distinct at the hardware source
+- Because hardware identity is now correct, removed the duplicate-ID skip/probe behavior from `TeleopSoftware/launch_devs.py`.
+- Kept the useful runtime fixes:
+  - `launch_devs.py` still uses `sys.executable`
+  - `SparkNode.py` now tolerates ESP32 boot chatter / delayed first JSON packet instead of crashing at startup

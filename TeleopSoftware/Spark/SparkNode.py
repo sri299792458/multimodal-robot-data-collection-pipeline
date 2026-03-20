@@ -28,20 +28,40 @@ class SparkNode(Node):
             dist += max   
         return dist/max*2*np.pi
 
+    def read_json_packet(self, con, max_packets=20):
+        for _ in range(max_packets):
+            payload = con.read_until(b'\x00')[:-1]
+            if not payload:
+                continue
+            text = payload.decode('utf-8', errors='ignore').strip()
+            if not text or not text.startswith('{'):
+                continue
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                continue
+        raise RuntimeError("no JSON payload received")
+
     def main(self):
         dev = os.sys.argv[1]
         latentcy_enable = len(os.sys.argv) > 2
         def init_connection():
-            con = serial.Serial(dev, 921600)
-            time.sleep(0.5) # Ignore bootloader messages
+            con = serial.Serial(dev, 921600, timeout=1.0)
+            time.sleep(1.5) # Allow ESP32 reset/boot chatter to settle
             con.reset_input_buffer()
             con.reset_output_buffer()
-            con.read_until(b'\x00')[:-1] 
             return con
-        con = init_connection()
-
-        data = con.read_until(b'\x00')[:-1]
-        data = json.loads(data.decode('utf-8'))
+        con = None
+        while True:
+            try:
+                if con is not None:
+                    con.close()
+                con = init_connection()
+                data = self.read_json_packet(con)
+                break
+            except RuntimeError:
+                print(f"Waiting for Spark JSON on {dev}")
+                time.sleep(1.0)
         ID = str(data['ID']).strip().lower()
         print(f"Connected to Spark: {ID} ({dev})")
         # Get the location of this python filem
@@ -68,7 +88,7 @@ class SparkNode(Node):
             exit_flag = False
             while not exit_flag:
                 try:
-                    data = con.read_until(b'\x00')[:-1]
+                    data = self.read_json_packet(con, max_packets=5)
                 except serial.SerialException:
                     print(f"Spark {ID} disconnected")
                     # rospy.sleep(1)
@@ -76,7 +96,8 @@ class SparkNode(Node):
                     time.sleep(1)
                     con = init_connection()
                     continue
-                data = json.loads(data.decode('utf-8'))
+                except RuntimeError:
+                    continue
                 raw_angles = data['values']
 
                 if False in data['status']:
