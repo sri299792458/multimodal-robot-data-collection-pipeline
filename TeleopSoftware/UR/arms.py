@@ -33,6 +33,9 @@ class UR:
     
     def get_receive(self, name):
         return self.ur_receive[name]
+
+    def has_receive(self, name):
+        return name in self.ur_receive
     
     def get_gripper(self, name):
         return self.ur_grippers[name]

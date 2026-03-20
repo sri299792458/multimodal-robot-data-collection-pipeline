@@ -361,6 +361,8 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize, clock):
 
         # Always: ----------------------------------------------------------------------
         if publish_ft:
+            if not URs.has_receive(arm):
+                continue
             tick_stamp = clock.now().to_msg()
             norm_ft = URs.get_receive(arm).getActualTCPForce()
             pubs[arm+"_ft"].publish(Float32MultiArray(data=norm_ft))
@@ -389,6 +391,5 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize, clock):
             pubs[arm+"_safety_mode"].publish(Int32(data=saftey_mode))
             _publish_stable_robot_state(arm, pubs, tick_stamp, q, cartesian, norm_ft, gripper)
             # print(raw_ft)
-
 
 

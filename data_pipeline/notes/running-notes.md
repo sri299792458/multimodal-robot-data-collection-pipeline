@@ -133,6 +133,23 @@
 - Updated `TeleopSoftware/UR/arms.py` so `enable_grippers` can be either a boolean or a per-arm map, matching the tested branch structure without breaking the existing call sites.
 - Intentionally left the `lightning_spark_enable` topic-selection bug unchanged for now because it exists in the tested branch as well; this sync pass is preserving calibrated behavior rather than changing control semantics.
 
+### Teleop bring-up findings
+
+- The host system Python had `rclpy` but did not have `ur_rtde`; the existing Conda interpreters had the opposite problem and could not load the ROS 2 Jazzy bindings.
+- Installed `ur_rtde` only into the local `.venv`, which already had working ROS bindings, so the current non-actuating Teleop bring-up path is `source /opt/ros/jazzy/setup.bash && .venv/bin/python TeleopSoftware/launch.py`.
+- Live launch testing showed both robot dashboards are reachable, but RTDE control is refused until remote control is enabled on the robot side.
+- The Teleop GUI previously crashed in the main loop if an arm failed RTDE initialization because `ros_update()` always dereferenced `URs.get_receive(arm)`.
+- Patched `TeleopSoftware/UR/arms.py` and `TeleopSoftware/launch_helpers/run.py` so the GUI stays up and continues advertising the expected raw and stamped topics even when RTDE receive interfaces are missing.
+- Verified live topic advertisement from `/gui_node` after the crash fix:
+  - `/lightning_spark_command_angles`
+  - `/lightning_spark_command_gripper`
+  - `/thunder_spark_command_angles`
+  - `/thunder_spark_command_gripper`
+  - `/spark/lightning/robot/*`
+  - `/spark/lightning/teleop/*`
+  - `/spark/thunder/robot/*`
+  - `/spark/thunder/teleop/*`
+
 ### RealSense timestamp caveat
 
 - Reading the official `realsense-ros` source showed that its published image stamps are derived from RealSense frame timestamps rather than the exact `host_capture_time_v1` rule declared in the V1 topic contract.

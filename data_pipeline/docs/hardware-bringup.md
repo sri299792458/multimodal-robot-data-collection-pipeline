@@ -85,7 +85,7 @@ If you are using SPARK, SpaceMouse, or VR inputs, start the legacy device launch
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-/usr/bin/python3 TeleopSoftware/launch_devs.py
+.venv/bin/python TeleopSoftware/launch_devs.py
 ```
 
 Leave this running.
@@ -97,10 +97,15 @@ In a new terminal:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-/usr/bin/python3 TeleopSoftware/launch.py
+.venv/bin/python TeleopSoftware/launch.py
 ```
 
 Use the GUI to connect to the UR arms and bring the system into the control mode you want to record.
+
+Notes:
+
+- The current local bring-up path uses `.venv` because that environment now contains both ROS-compatible Python packages and `ur_rtde`.
+- If the GUI logs `Please enable remote control on the robot!`, the dashboard connection succeeded but UR RTDE control was refused by the robot-side remote-control setting.
 
 Expected V1 robot topics come from this process:
 
