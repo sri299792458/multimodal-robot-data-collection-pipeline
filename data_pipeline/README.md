@@ -4,6 +4,8 @@ This directory contains the V1 raw-capture and LeRobot conversion stack.
 
 The implementation contract lives in [V1_SPEC.md](./V1_SPEC.md). The running implementation log lives in [notes/running-notes.md](./notes/running-notes.md).
 
+For a concrete first real-data bring-up sequence, use [docs/hardware-bringup.md](./docs/hardware-bringup.md).
+
 
 ## Current Scope
 
@@ -13,10 +15,10 @@ The non-hardware V1 path is in place:
 - raw episode recording as one rosbag per demo
 - raw-to-LeRobot conversion for the `multisensor_20hz` profile
 - dummy-data eval path
-- RealSense SDK bridge with host-capture timestamp semantics
+- official `realsense2_camera` integration with metadata-aware conversion
 - GelSight ROS2 bridge process for the declared tactile topics
 
-The remaining work is live hardware validation and any fixes that fall out of that.
+The remaining work is live hardware validation, especially the current L515 scene-camera limitation in the stock ROS wrapper on this host.
 
 
 ## Runtime Split
@@ -39,26 +41,21 @@ Offline conversion and LeRobot export should use the local `.venv` created by:
 source .venv/bin/activate
 ```
 
-### RealSense ROS2 bridge build
+## Launching The Sensor Contract
+
+The current intended RealSense path is the official ROS node:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 ./data_pipeline/setup_realsense_contract_runtime.sh
-source install/spark_realsense_bridge/setup.bash
-```
-
-
-## Launching The Sensor Contract
-
-To launch the RealSense contract publishers:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source install/spark_realsense_bridge/setup.bash
 ros2 launch data_pipeline/launch/realsense_contract.launch.py \
   wrist_serial_no:=<WRIST_SERIAL> \
   scene_serial_no:=<SCENE_SERIAL>
 ```
+
+This wrapper records the official RealSense metadata topics and the converter prefers `time_of_arrival` from those topics for camera alignment.
+
+See [docs/hardware-bringup.md](./docs/hardware-bringup.md) for the exact current sequence and the current L515 limitation on this machine.
 
 To launch the GelSight contract publishers:
 

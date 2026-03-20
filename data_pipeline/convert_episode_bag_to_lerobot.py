@@ -18,6 +18,7 @@ import numpy as np
 import rosbag2_py
 import yaml
 from geometry_msgs.msg import PoseStamped, WrenchStamped
+from realsense2_camera_msgs.msg import Metadata
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 from sensor_msgs.msg import Image, JointState
@@ -165,6 +166,10 @@ def parse_message(topic: str, msg: Any, bag_timestamp_ns: int, parse_value: bool
     if not parse_value:
         return ts_ns, None
 
+    if isinstance(msg, Metadata):
+        payload = json.loads(msg.json_data)
+        return ts_ns, payload
+
     if isinstance(msg, Image):
         return ts_ns, decode_image_to_rgb(msg)
 
@@ -236,10 +241,20 @@ def build_selected_image_specs(profile: dict[str, Any], topics_with_data: set[st
     return selected_specs
 
 
+def build_parse_topics(topics_to_read: set[str], topic_types: dict[str, str], value_topics: set[str]) -> set[str]:
+    parse_topics = set(value_topics)
+    parse_topics.update(
+        topic
+        for topic in topics_to_read
+        if topic_types.get(topic) == "realsense2_camera_msgs/msg/Metadata"
+    )
+    return parse_topics
+
+
 def read_topic_series(
     bag_dir: Path,
     topics_to_read: set[str],
-    value_topics: set[str],
+    parse_topics: set[str],
 ) -> dict[str, TopicSeries]:
     reader = rosbag2_py.SequentialReader()
     storage_options = rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id="sqlite3")
@@ -265,12 +280,56 @@ def read_topic_series(
         if topic not in series:
             continue
         msg = deserialize_message(data, message_types[topic])
-        ts_ns, value = parse_message(topic, msg, bag_timestamp_ns, parse_value=topic in value_topics)
+        ts_ns, value = parse_message(topic, msg, bag_timestamp_ns, parse_value=topic in parse_topics)
         series[topic].timestamps_ns.append(ts_ns)
         series[topic].values.append(value)
         series[topic].bag_timestamps_ns.append(bag_timestamp_ns)
 
     return series
+
+
+def apply_realsense_metadata_timestamps(series: dict[str, TopicSeries]) -> None:
+    image_to_metadata = {
+        "/spark/cameras/wrist/color/image_raw": "/spark/cameras/wrist/color/metadata",
+        "/spark/cameras/wrist/depth/image_rect_raw": "/spark/cameras/wrist/depth/metadata",
+        "/spark/cameras/scene/color/image_raw": "/spark/cameras/scene/color/metadata",
+        "/spark/cameras/scene/depth/image_rect_raw": "/spark/cameras/scene/depth/metadata",
+    }
+
+    for image_topic, metadata_topic in image_to_metadata.items():
+        image_series = series.get(image_topic)
+        metadata_series = series.get(metadata_topic)
+        if not image_series or not metadata_series:
+            continue
+        if not metadata_series.values:
+            continue
+
+        stamp_to_toa_ns: dict[int, list[int]] = {}
+        for ts_ns, value in zip(metadata_series.timestamps_ns, metadata_series.values, strict=False):
+            if not isinstance(value, dict):
+                continue
+            time_of_arrival_ms = value.get("time_of_arrival")
+            if time_of_arrival_ms is None:
+                continue
+            toa_ns = int(round(float(time_of_arrival_ms) * 1_000_000.0))
+            stamp_to_toa_ns.setdefault(ts_ns, []).append(toa_ns)
+
+        if not stamp_to_toa_ns:
+            continue
+
+        replaced = 0
+        new_timestamps_ns: list[int] = []
+        for ts_ns in image_series.timestamps_ns:
+            candidates = stamp_to_toa_ns.get(ts_ns)
+            if candidates:
+                new_timestamps_ns.append(candidates.pop(0))
+                replaced += 1
+            else:
+                new_timestamps_ns.append(ts_ns)
+
+        if replaced:
+            image_series.timestamps_ns = new_timestamps_ns
+            image_series._ts_array = None
 
 
 def ensure_series_present(series: dict[str, TopicSeries], topics: list[str]) -> None:
@@ -602,8 +661,11 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     all_topics_to_read = set(manifest["topics"])
+    topic_types = manifest.get("topic_types", {})
     value_topics = build_value_topics(profile) & all_topics_to_read
-    series = read_topic_series(bag_dir, all_topics_to_read, value_topics)
+    parse_topics = build_parse_topics(all_topics_to_read, topic_types, value_topics)
+    series = read_topic_series(bag_dir, all_topics_to_read, parse_topics)
+    apply_realsense_metadata_timestamps(series)
     topics_with_data = {topic for topic, values in series.items() if values.timestamps_ns}
 
     selected_image_specs = build_selected_image_specs(profile, topics_with_data)

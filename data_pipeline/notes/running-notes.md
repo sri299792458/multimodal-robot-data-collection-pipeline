@@ -309,3 +309,83 @@
   - standing eval usage.
 - Updated the repository root `README.md` so the data-pipeline section now points readers to the new runbook first instead of only the spec and notes.
 - Deliberately did not keep extra orchestration or batch-conversion wrappers before hardware validation; the runtime surface remains the existing recorder, converter, eval script, and per-sensor launch entrypoints.
+
+### Hardware bring-up doc pass
+
+- Added `data_pipeline/docs/hardware-bringup.md` as the explicit first-real-run checklist.
+- Kept that guide procedural and narrow:
+  - one-time environment setup,
+  - device-ID discovery,
+  - Teleop runtime bring-up,
+  - RealSense and GelSight contract launch,
+  - recorder dry-run,
+  - short smoke-test recording,
+  - bag and manifest inspection,
+  - offline conversion, and
+  - standing real-episode eval.
+- Updated `data_pipeline/README.md` to point directly to the new hardware bring-up guide.
+
+### RealSense hardware-debug pass
+
+- On this machine, the immediate RealSense blocker was lower than ROS:
+  - both cameras showed up in `lsusb`,
+  - but their USB video interfaces were initially unbound from `uvcvideo`,
+  - so neither the custom bridge nor the ROS-packaged wrapper could see working devices.
+- Confirmed this by inspecting `lsusb -t`, which showed the RealSense video interfaces as `Driver=[none]` while GelSight was already bound to `uvcvideo`.
+- Added `data_pipeline/bind_realsense_uvc.sh` as the repeatable hardware-bootstrap step that binds unclaimed RealSense video interfaces to `uvcvideo`.
+- After binding:
+  - `/dev/video*` nodes appeared for both the L515 and the D405,
+  - `/dev/v4l/by-id/` gained stable RealSense symlinks,
+  - `v4l2-ctl --list-devices` showed both cameras,
+  - and `rs-enumerate-devices` started seeing the D405.
+
+### Official RealSense runtime correction
+
+- Re-checked the official `realsense2_camera` path from a clean local source tree and from the distro-installed ROS package.
+- The official wrapper already publishes `/color/metadata` and `/depth/metadata` topics whose JSON payload includes:
+  - `clock_domain`
+  - `frame_timestamp`
+  - `time_of_arrival`
+  - `backend_timestamp`
+  - `hw_timestamp`
+- Live D405 probing showed the stock wrapper currently stamps `Image.header.stamp` from `frame_timestamp` rather than `time_of_arrival`.
+- Live D405 probing also showed that this distro wrapper publishes the color topic as `color/image_rect_raw`, so the V1 launch wrapper now remaps that private topic to the stable contract name `color/image_raw`.
+- Measured one live D405 sample and confirmed:
+  - `header.stamp == frame_timestamp`
+  - `time_of_arrival` trails by a small positive delta on this host
+- Updated the V1 converter so that when the official RealSense metadata topics are present in the bag, the corresponding RealSense image series uses `time_of_arrival` for alignment instead of the wrapper header stamp.
+- Updated the published profile so the recorder keeps these official metadata topics in the raw bag:
+  - `/spark/cameras/wrist/color/metadata`
+  - `/spark/cameras/wrist/depth/metadata`
+  - `/spark/cameras/scene/color/metadata`
+  - `/spark/cameras/scene/depth/metadata`
+
+### L515 limitation on this host
+
+- The current upstream `realsense-ros` line removed L500/L515 support starting in `4.55.1`; this is documented in the upstream changelog.
+- The distro-installed ROS wrapper on this machine is `realsense2_camera v4.56.4`, so it is already on the post-L500-removal line.
+- Stock probing with:
+  - `ros2 launch realsense2_camera rs_launch.py ... serial_no:=_00000000F1380660`
+  - and `rs-enumerate-devices -s`
+  still sees only the D405 and not the L515.
+- A previous `realsense-viewer --debug` log that looked like "2 RealSense devices" turned out to be misleading:
+  - one of the two device paths was actually the attached GelSight USB camera path, not the L515 path
+  - so that log should not be interpreted as proof that the stock ROS/runtime stack can currently use the L515 on this host
+- Current practical state:
+  - official ROS path for D405 wrist camera: usable
+  - official ROS path for L515 scene camera: still blocked on this host
+  - converter-side timestamp semantics for official RealSense metadata: implemented
+
+### Runtime cleanup after the official-path switch
+
+- Removed the abandoned active fallback artifacts from the current working tree:
+  - `data_pipeline/ros2/spark_realsense_bridge/`
+  - `data_pipeline/v4l_camera_bridge.py`
+  - `data_pipeline/launch/realsense_v4l_contract.launch.py`
+  - `data_pipeline/bind_realsense_uvc.sh`
+- Older notes above that mention those pieces are retained as historical debug context only; they are no longer the intended V1 runtime path.
+- The custom C++ `spark_realsense_bridge` is still not usable:
+  - it segfaults during ROS FastDDS participant creation before camera startup,
+  - and the currently installed system `librealsense2` exports embedded FastDDS symbols, which is the leading conflict hypothesis.
+- The ROS-packaged `realsense2_camera` node became usable for the D405 after the manual UVC bind, but the current L515 path is still not clean in that wrapper on this host.
+- Added `data_pipeline/v4l_camera_bridge.py` and `data_pipeline/launch/realsense_v4l_contract.launch.py` as the smallest working RGB-only fallback so hardware recording can proceed for the required published color streams while the SDK/depth path is still unresolved.
