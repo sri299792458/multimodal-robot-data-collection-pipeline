@@ -517,23 +517,21 @@
   - keep the current runtime topic surface for now,
   - enrich each manifest sensor record with stable raw identity fields,
   - and let published profiles map those raw sensor identities into dataset field names.
-- Added manifest-facing sensor fields:
+- Final lean per-sensor manifest fields:
   - `sensor_id`
   - `modality`
   - `attached_to`
-  - `mount_parent`
   - `mount_site`
-  - `mount_index`
-  - `semantic_role_hint`
-  - `identity_complete`
-- Added top-level manifest fields:
+  - `topic_names`
+  - `serial_number`
+  - `model`
+  - `calibration_ref`
+- Added top-level manifest field:
   - `sensor_inventory_version`
-  - `sensor_inventory_complete`
-- `sensors.example.yaml` is now the place where the operator can remove ambiguity for the current rig by filling in attachment metadata such as:
+- `sensors.example.yaml` is now the place where the operator can remove ambiguity for the current rig by filling in fields such as:
   - `attached_to: lightning`
-  - `mount_parent: robotiq_2f85_gripper`
   - `mount_site: finger_left`
-- This keeps the current runtime conservative while making the raw layer explicit enough to support later renaming or profile changes.
+- This keeps the current runtime conservative while making the raw layer explicit enough to support later renaming or profile changes, without carrying debug-style per-episode sensor clutter.
 
 ### Episode language field
 

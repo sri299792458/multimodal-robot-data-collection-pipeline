@@ -97,31 +97,21 @@ raw_episodes/
 - `topics`
 - `topic_types`
 - `sensor_inventory_version`
-- `sensor_inventory_complete`
 - `sensors`
 - `mapping_profile`
 - `profile_version`
 - `clock_policy`
 - `git_commit`
 
-The `sensors` section must include per-sensor identity and attachment metadata:
+The `sensors` section should stay minimal and include only:
 
 - `sensor_id`
-- `sensor_name`
-- `sensor_type`
 - `modality`
 - `attached_to`
-- `mount_parent`
 - `mount_site`
-- `mount_index`
-- `semantic_role_hint`
 - `topic_names`
 - `serial_number`
 - `model`
-- `firmware_version`
-- `resolution`
-- `fps`
-- `driver_node`
 - `calibration_ref`
 
 For RealSense cameras, serial number is required.

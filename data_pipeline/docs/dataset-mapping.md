@@ -338,7 +338,6 @@ The raw manifest should still preserve every recorded sensor as a sensor instanc
 
 - `sensor_id`
 - `attached_to`
-- `mount_parent`
 - `mount_site`
 - `serial_number`
 

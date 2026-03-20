@@ -83,9 +83,6 @@ def build_manifest(
     profile_version = profile["profile_version"]
     topic_types = {topic: live_topics[topic] for topic in selected_topics}
     sensors = infer_sensor_metadata(selected_topics, sensor_overrides=sensor_overrides)
-    sensor_inventory_complete = bool(sensors) and all(
-        bool(sensor.get("identity_complete", False)) for sensor in sensors
-    )
 
     return {
         "episode_id": args.episode_id,
@@ -100,7 +97,6 @@ def build_manifest(
         "topics": selected_topics,
         "topic_types": topic_types,
         "sensor_inventory_version": 2,
-        "sensor_inventory_complete": sensor_inventory_complete,
         "sensors": sensors,
         "mapping_profile": profile_name,
         "profile_version": profile_version,
@@ -158,16 +154,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"mapping_profile={profile['profile_name']}")
         print(f"profile_path={resolved_profile_path}")
         print(f"language_instruction={dry_run_manifest['language_instruction'] or ''}")
-        print(f"sensor_inventory_complete={dry_run_manifest['sensor_inventory_complete']}")
         print(f"bag_topics={len(selected_topics)}")
         for sensor in dry_run_manifest["sensors"]:
             print(
                 "sensor="
-                f"{sensor['sensor_name']} "
                 f"id={sensor.get('sensor_id')} "
+                f"serial={sensor.get('serial_number')} "
+                f"modality={sensor.get('modality')} "
                 f"attached_to={sensor.get('attached_to')} "
-                f"mount={sensor.get('mount_parent')}:{sensor.get('mount_site')} "
-                f"complete={sensor.get('identity_complete')}"
+                f"mount_site={sensor.get('mount_site')}"
             )
         for topic in selected_topics:
             print(f"{topic} [{live_topics[topic]}]")

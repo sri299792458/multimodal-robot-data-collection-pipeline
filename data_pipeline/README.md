@@ -190,7 +190,7 @@ So the override file should record not just serials, but also:
 
 - a stable `sensor_id`
 - `attached_to` (`lightning`, `thunder`, or `world`)
-- `mount_parent` and `mount_site`
+- `mount_site`
 - `calibration_ref`
 
 That keeps the raw episodes convertible even if the naming convention changes later.
