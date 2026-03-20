@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Publish one RealSense device into the V1 `/spark/cameras/...` contract."""
+"""Publish one or more RealSense devices into the V1 `/spark/cameras/...` contract."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 import pyrealsense2 as rs
 import rclpy
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 
@@ -26,6 +27,14 @@ class StreamProfile:
     fps: int
 
 
+@dataclass(frozen=True)
+class CameraSpec:
+    camera_name: str
+    serial_no: str
+    color_profile: StreamProfile
+    depth_profile: StreamProfile
+
+
 def parse_profile(value: str) -> StreamProfile:
     tokens = [token.strip() for token in value.split(",")]
     if len(tokens) != 3:
@@ -34,6 +43,26 @@ def parse_profile(value: str) -> StreamProfile:
     if width <= 0 or height <= 0 or fps <= 0:
         raise ValueError(f"Invalid non-positive profile component in {value!r}")
     return StreamProfile(width=width, height=height, fps=fps)
+
+
+def parse_camera_spec(value: str) -> CameraSpec:
+    tokens = [token.strip() for token in value.split(";", maxsplit=3)]
+    if len(tokens) != 4:
+        raise ValueError(
+            "Expected camera spec CAMERA_NAME;SERIAL_NO;COLOR_PROFILE;DEPTH_PROFILE, "
+            f"got {value!r}"
+        )
+    camera_name, serial_no, color_profile, depth_profile = tokens
+    if not camera_name:
+        raise ValueError(f"Camera spec is missing a camera name: {value!r}")
+    if not normalize_serial(serial_no):
+        raise ValueError(f"Camera spec is missing a serial number: {value!r}")
+    return CameraSpec(
+        camera_name=camera_name,
+        serial_no=serial_no,
+        color_profile=parse_profile(color_profile),
+        depth_profile=parse_profile(depth_profile),
+    )
 
 
 def get_camera_info(device: rs.device, field: rs.camera_info) -> str:
@@ -69,11 +98,10 @@ def query_devices_with_retry(*, max_attempts: int = 6, delay_s: float = 1.0) -> 
     raise RuntimeError(f"Failed to enumerate RealSense devices after {max_attempts} attempts: {last_error}")
 
 
-def resolve_serial(requested_serial: str) -> str:
+def resolve_serial_from_devices(requested_serial: str, devices: list[rs.device]) -> str:
     requested_aliases = serial_aliases(requested_serial)
     exact_matches: list[str] = []
     alias_matches: list[str] = []
-    devices = query_devices_with_retry()
 
     for device in devices:
         serial = get_camera_info(device, rs.camera_info.serial_number)
@@ -104,6 +132,30 @@ def resolve_serial(requested_serial: str) -> str:
     raise RuntimeError(f"Requested RealSense serial {requested_serial!r} not found. Available serials: {available}")
 
 
+def resolve_camera_specs(camera_specs: list[CameraSpec]) -> list[CameraSpec]:
+    devices = query_devices_with_retry()
+    resolved_specs: list[CameraSpec] = []
+    resolved_serials: set[str] = set()
+
+    for spec in camera_specs:
+        resolved_serial = resolve_serial_from_devices(spec.serial_no, devices)
+        if resolved_serial in resolved_serials:
+            raise RuntimeError(
+                f"Multiple camera specs resolved to the same physical serial {resolved_serial!r}. "
+                "Each launched camera must map to a unique device."
+            )
+        resolved_serials.add(resolved_serial)
+        resolved_specs.append(
+            CameraSpec(
+                camera_name=spec.camera_name,
+                serial_no=resolved_serial,
+                color_profile=spec.color_profile,
+                depth_profile=spec.depth_profile,
+            )
+        )
+    return resolved_specs
+
+
 class RealSenseContractBridge(Node):
     def __init__(
         self,
@@ -118,7 +170,7 @@ class RealSenseContractBridge(Node):
     ) -> None:
         super().__init__(camera_name, namespace=camera_namespace)
 
-        self.serial_no = resolve_serial(serial_no)
+        self.serial_no = serial_no
         self.color_profile = color_profile
         self.depth_profile = depth_profile
         self.enable_depth = enable_depth
@@ -126,16 +178,7 @@ class RealSenseContractBridge(Node):
         self._stop_event = threading.Event()
         self._capture_thread: threading.Thread | None = None
         self._warned_missing_frame = False
-
-        self.declare_parameter("serial_no", self.serial_no)
-        self.declare_parameter("device_type", "")
-        self.declare_parameter("firmware_version", "")
-        self.declare_parameter("color_profile", self._format_profile(color_profile))
-        self.declare_parameter("depth_profile", self._format_profile(depth_profile))
-        self.declare_parameter("enable_depth", enable_depth)
-        self.declare_parameter("wait_for_frames_timeout_ms", wait_for_frames_timeout_ms)
-        self._color_pub = self.create_publisher(Image, "~/color/image_raw", 10)
-        self._depth_pub = self.create_publisher(Image, "~/depth/image_rect_raw", 10)
+        self._streaming_event = threading.Event()
 
         self._pipeline = rs.pipeline()
         config = rs.config()
@@ -158,23 +201,20 @@ class RealSenseContractBridge(Node):
 
         self._pipeline_profile = self._start_pipeline_with_retry(config)
         device = self._pipeline_profile.get_device()
-        self.set_parameters(
-            [
-                rclpy.parameter.Parameter(
-                    "device_type",
-                    rclpy.Parameter.Type.STRING,
-                    get_camera_info(device, rs.camera_info.name),
-                ),
-                rclpy.parameter.Parameter(
-                    "firmware_version",
-                    rclpy.Parameter.Type.STRING,
-                    get_camera_info(device, rs.camera_info.firmware_version),
-                ),
-            ]
-        )
+
+        self.declare_parameter("serial_no", self.serial_no)
+        self.declare_parameter("device_type", get_camera_info(device, rs.camera_info.name))
+        self.declare_parameter("firmware_version", get_camera_info(device, rs.camera_info.firmware_version))
+        self.declare_parameter("color_profile", self._format_profile(color_profile))
+        self.declare_parameter("depth_profile", self._format_profile(depth_profile))
+        self.declare_parameter("enable_depth", enable_depth)
+        self.declare_parameter("wait_for_frames_timeout_ms", wait_for_frames_timeout_ms)
+
+        self._color_pub = self.create_publisher(Image, "~/color/image_raw", 10)
+        self._depth_pub = self.create_publisher(Image, "~/depth/image_rect_raw", 10)
 
         self.get_logger().info(
-            "Started RealSense bridge for serial=%s model=%s color=%s depth=%s enable_depth=%s"
+            "Initialized RealSense bridge for serial=%s model=%s color=%s depth=%s enable_depth=%s"
             % (
                 self.serial_no,
                 get_camera_info(device, rs.camera_info.name) or "<unknown>",
@@ -187,6 +227,9 @@ class RealSenseContractBridge(Node):
     def start(self) -> None:
         self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._capture_thread.start()
+
+    def wait_until_streaming(self, timeout_s: float) -> bool:
+        return self._streaming_event.wait(timeout=timeout_s)
 
     def close(self) -> None:
         self._stop_event.set()
@@ -244,6 +287,18 @@ class RealSenseContractBridge(Node):
                 self._color_pub.publish(self._frame_to_image_msg(color_frame, stamp, "bgr8"))
                 if depth_frame is not None:
                     self._depth_pub.publish(self._frame_to_image_msg(depth_frame, stamp, "16UC1"))
+                if not self._streaming_event.is_set():
+                    self._streaming_event.set()
+                    self.get_logger().info(
+                        "Started RealSense bridge for serial=%s model=%s color=%s depth=%s enable_depth=%s"
+                        % (
+                            self.serial_no,
+                            self.get_parameter("device_type").value or "<unknown>",
+                            self._format_profile(self.color_profile),
+                            self._format_profile(self.depth_profile),
+                            self.enable_depth,
+                        )
+                    )
             except Exception:
                 if not rclpy.ok() or self._stop_event.is_set():
                     break
@@ -264,41 +319,126 @@ class RealSenseContractBridge(Node):
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--camera-name", required=True)
     parser.add_argument("--camera-namespace", default="/spark/cameras")
-    parser.add_argument("--serial-no", required=True)
-    parser.add_argument("--color-profile", default="640,480,30")
-    parser.add_argument("--depth-profile", default="640,480,30")
     parser.add_argument("--enable-depth", default="true")
     parser.add_argument("--wait-for-frames-timeout-ms", type=int, default=5000)
+    parser.add_argument("--startup-timeout-s", type=float, default=15.0)
+    parser.add_argument(
+        "--camera-spec",
+        action="append",
+        default=[],
+        help=(
+            "Repeatable multi-camera spec in the form "
+            "CAMERA_NAME;SERIAL_NO;COLOR_PROFILE;DEPTH_PROFILE"
+        ),
+    )
+
+    parser.add_argument("--camera-name")
+    parser.add_argument("--serial-no")
+    parser.add_argument("--color-profile", default="640,480,30")
+    parser.add_argument("--depth-profile", default="640,480,30")
+
+    parser.add_argument("--wrist-serial-no", default="")
+    parser.add_argument("--scene-serial-no", default="")
+    parser.add_argument("--wrist-color-profile", default="640,480,30")
+    parser.add_argument("--scene-color-profile", default="640,480,30")
+    parser.add_argument("--wrist-depth-profile", default="640,480,30")
+    parser.add_argument("--scene-depth-profile", default="640,480,30")
     return parser
+
+
+def build_camera_specs(args: argparse.Namespace) -> list[CameraSpec]:
+    if args.camera_spec:
+        return [parse_camera_spec(value) for value in args.camera_spec]
+
+    if args.camera_name or args.serial_no:
+        if not args.camera_name or not args.serial_no:
+            raise ValueError("Legacy single-camera mode requires both --camera-name and --serial-no.")
+        return [
+            CameraSpec(
+                camera_name=args.camera_name,
+                serial_no=args.serial_no,
+                color_profile=parse_profile(args.color_profile),
+                depth_profile=parse_profile(args.depth_profile),
+            )
+        ]
+
+    specs: list[CameraSpec] = []
+    if normalize_serial(args.wrist_serial_no):
+        specs.append(
+            CameraSpec(
+                camera_name="wrist",
+                serial_no=args.wrist_serial_no,
+                color_profile=parse_profile(args.wrist_color_profile),
+                depth_profile=parse_profile(args.wrist_depth_profile),
+            )
+        )
+    if normalize_serial(args.scene_serial_no):
+        specs.append(
+            CameraSpec(
+                camera_name="scene",
+                serial_no=args.scene_serial_no,
+                color_profile=parse_profile(args.scene_color_profile),
+                depth_profile=parse_profile(args.scene_depth_profile),
+            )
+        )
+    if not specs:
+        raise ValueError("Provide at least one camera via legacy single-camera args or wrist/scene serial args.")
+    return specs
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    color_profile = parse_profile(args.color_profile)
-    depth_profile = parse_profile(args.depth_profile)
     enable_depth = parse_bool(args.enable_depth)
+    camera_specs = resolve_camera_specs(build_camera_specs(args))
 
     rclpy.init(args=None)
-    node = RealSenseContractBridge(
-        camera_name=args.camera_name,
-        camera_namespace=args.camera_namespace,
-        serial_no=args.serial_no,
-        color_profile=color_profile,
-        depth_profile=depth_profile,
-        enable_depth=enable_depth,
-        wait_for_frames_timeout_ms=args.wait_for_frames_timeout_ms,
-    )
-    node.start()
+    nodes: list[RealSenseContractBridge] = []
+    executor = MultiThreadedExecutor(num_threads=max(2, len(camera_specs)))
+    try:
+        for spec in camera_specs:
+            node = RealSenseContractBridge(
+                camera_name=spec.camera_name,
+                camera_namespace=args.camera_namespace,
+                serial_no=spec.serial_no,
+                color_profile=spec.color_profile,
+                depth_profile=spec.depth_profile,
+                enable_depth=enable_depth,
+                wait_for_frames_timeout_ms=args.wait_for_frames_timeout_ms,
+            )
+            node.start()
+            if not node.wait_until_streaming(timeout_s=args.startup_timeout_s):
+                raise RuntimeError(
+                    f"Camera {spec.camera_name} (serial={node.serial_no}) did not produce frames within "
+                    f"{args.startup_timeout_s:.1f}s."
+                )
+            nodes.append(node)
+            executor.add_node(node)
+    except Exception:
+        for node in nodes:
+            try:
+                executor.remove_node(node)
+            except Exception:
+                pass
+            node.close()
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+        raise
 
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
-        node.close()
-        node.destroy_node()
+        for node in nodes:
+            try:
+                executor.remove_node(node)
+            except Exception:
+                pass
+            node.close()
+            node.destroy_node()
+        executor.shutdown()
         if rclpy.ok():
             rclpy.shutdown()
     return 0
