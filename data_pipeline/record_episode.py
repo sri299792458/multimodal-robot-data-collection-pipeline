@@ -38,6 +38,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-id", required=True)
     parser.add_argument("--task-name", required=True)
+    parser.add_argument("--language-instruction", default="")
     parser.add_argument("--robot-id", required=True)
     parser.add_argument("--operator", required=True)
     parser.add_argument("--profile", default="auto")
@@ -90,6 +91,7 @@ def build_manifest(
         "episode_id": args.episode_id,
         "dataset_id": args.dataset_id,
         "task_name": args.task_name,
+        "language_instruction": str(args.language_instruction).strip() or None,
         "robot_id": args.robot_id,
         "active_arms": active_arms,
         "operator": args.operator,
@@ -155,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"active_arms={','.join(active_arms)}")
         print(f"mapping_profile={profile['profile_name']}")
         print(f"profile_path={resolved_profile_path}")
+        print(f"language_instruction={dry_run_manifest['language_instruction'] or ''}")
         print(f"sensor_inventory_complete={dry_run_manifest['sensor_inventory_complete']}")
         print(f"bag_topics={len(selected_topics)}")
         for sensor in dry_run_manifest["sensors"]:

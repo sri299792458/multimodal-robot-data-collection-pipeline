@@ -415,6 +415,7 @@ def build_notes_template(manifest: dict[str, Any]) -> str:
         "",
         f"- dataset_id: {manifest['dataset_id']}",
         f"- task_name: {manifest['task_name']}",
+        f"- language_instruction: {manifest.get('language_instruction') or ''}",
         f"- robot_id: {manifest['robot_id']}",
         f"- active_arms: {', '.join(manifest.get('active_arms', [])) or 'unknown'}",
         f"- operator: {manifest['operator']}",

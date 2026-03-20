@@ -241,6 +241,7 @@ source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 data_pipeline/record_episode.py \
   --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
+  --language-instruction "pick up the object and place it in the target area" \
   --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --sensors-file data_pipeline/configs/sensors.local.yaml \
@@ -254,6 +255,7 @@ The dry-run output now also prints:
 - `active_arms=...`
 - `mapping_profile=...`
 - `profile_path=...`
+- `language_instruction=...`
 
 
 ## 8. Record One Short Real Episode
@@ -265,6 +267,7 @@ source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 data_pipeline/record_episode.py \
   --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
+  --language-instruction "pick up the object and place it in the target area" \
   --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --sensors-file data_pipeline/configs/sensors.local.yaml

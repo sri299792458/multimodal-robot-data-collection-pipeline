@@ -451,6 +451,7 @@ def align_episode(
     profile: dict[str, Any],
     selected_image_specs: list[dict[str, Any]],
     task_name: str,
+    language_instruction: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
     arm_order = profile["notes"]["arm_order"]
     fps = int(profile["dataset"]["fps"])
@@ -570,7 +571,7 @@ def align_episode(
         frame = {
             "observation.state": state_vector,
             "action": action_vector,
-            "task": task_name,
+            "task": language_instruction or task_name,
             **image_values,
         }
         frames.append(frame)
@@ -689,6 +690,7 @@ def main(argv: list[str] | None = None) -> int:
         profile=effective_profile,
         selected_image_specs=selected_image_specs,
         task_name=manifest["task_name"],
+        language_instruction=manifest.get("language_instruction"),
     )
 
     image_fields = [spec["field"] for spec in selected_image_specs]

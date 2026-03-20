@@ -58,6 +58,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-id", default="dummy_multisensor_v1")
     parser.add_argument("--task-name", default="dummy_pick_place")
+    parser.add_argument("--language-instruction", default="")
     parser.add_argument("--robot-id", default="spark_bimanual")
     parser.add_argument("--operator", default="codex")
     parser.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
@@ -263,6 +264,7 @@ def build_manifest(args: argparse.Namespace, profile: dict, episode_id: str, sta
         "episode_id": episode_id,
         "dataset_id": args.dataset_id,
         "task_name": args.task_name,
+        "language_instruction": str(args.language_instruction).strip() or args.task_name,
         "robot_id": args.robot_id,
         "active_arms": active_arms,
         "operator": args.operator,

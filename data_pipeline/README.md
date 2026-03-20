@@ -107,6 +107,7 @@ Dry-run the topic selection first:
 /usr/bin/python3 data_pipeline/record_episode.py \
   --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
+  --language-instruction "pick up the object and place it in the target area" \
   --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --sensors-file data_pipeline/configs/sensors.example.yaml \
@@ -119,6 +120,7 @@ Record one episode:
 /usr/bin/python3 data_pipeline/record_episode.py \
   --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
+  --language-instruction "pick up the object and place it in the target area" \
   --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --sensors-file data_pipeline/configs/sensors.example.yaml

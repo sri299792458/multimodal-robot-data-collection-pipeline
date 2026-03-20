@@ -534,3 +534,11 @@
   - `mount_parent: robotiq_2f85_gripper`
   - `mount_site: finger_left`
 - This keeps the current runtime conservative while making the raw layer explicit enough to support later renaming or profile changes.
+
+### Episode language field
+
+- Added an optional `language_instruction` field to the raw episode manifest.
+- This is intentionally episode-level only for now.
+- `task_name` remains the stable internal task identifier.
+- During conversion, published LeRobot `task` now prefers `language_instruction` and falls back to `task_name` if no instruction was supplied.
+- This keeps the change low-complexity while preserving a clean path for future language-conditioned training.

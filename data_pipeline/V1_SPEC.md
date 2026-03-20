@@ -88,6 +88,7 @@ raw_episodes/
 - `episode_id`
 - `dataset_id`
 - `task_name`
+- `language_instruction` (optional, recommended for language-conditioned training)
 - `robot_id`
 - `active_arms`
 - `operator`
@@ -126,6 +127,8 @@ The `sensors` section must include per-sensor identity and attachment metadata:
 For RealSense cameras, serial number is required.
 
 `sensor_id` is the raw-layer stable identifier. Published dataset field names may change later, but `sensor_id` and the attachment fields should make it possible to remap old raw episodes without ambiguity.
+
+If `language_instruction` is present, the converter should use it as the published task string. Otherwise it should fall back to `task_name`.
 
 
 ## 8. Raw Layer Rule
