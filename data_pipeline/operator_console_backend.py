@@ -31,6 +31,7 @@ CONVERTER_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 SYSTEM_PYTHON = "/usr/bin/python3"
 PRESETS_PATH = REPO_ROOT / "data_pipeline" / "configs" / "operator_console_presets.yaml"
 STATE_DIR = REPO_ROOT / ".operator_console"
+TOPIC_PROBE_SCRIPT = REPO_ROOT / "data_pipeline" / "ros_topic_probe.py"
 
 
 @dataclass
@@ -426,7 +427,9 @@ class OperatorConsoleBackend:
         process = self.processes[process_name]
         missing_topics = [topic for topic in required_topics if topic not in live_topics]
         dead_sample_topics = [
-            topic for topic in sample_topics if topic in live_topics and not self._topic_has_message_cached(topic)
+            topic
+            for topic in sample_topics
+            if topic in live_topics and not self._topic_has_message_cached(topic, topic_type=live_topics.get(topic, ""))
         ]
         details = []
         if missing_topics:
@@ -501,26 +504,43 @@ class OperatorConsoleBackend:
             topics[topic.strip()] = type_name.rstrip("]").strip()
         return topics
 
-    def _topic_has_message(self, topic: str, timeout_s: float = 1.0) -> bool:
+    def _topic_has_message(self, topic: str, topic_type: str = "", timeout_s: float = 1.0) -> bool:
+        probe_command = [
+            shlex.quote(SYSTEM_PYTHON),
+            shlex.quote(str(TOPIC_PROBE_SCRIPT)),
+            "--topic",
+            shlex.quote(topic),
+            "--timeout",
+            shlex.quote(str(timeout_s)),
+        ]
+        if topic_type:
+            probe_command.extend(["--topic-type", shlex.quote(topic_type)])
         try:
             result = self._run_ros_command(
-                f"ros2 topic echo --once {shlex.quote(topic)}",
-                timeout=timeout_s,
+                " ".join(probe_command),
+                timeout=max(2.0, timeout_s + 1.0),
                 check=False,
             )
         except subprocess.TimeoutExpired:
             return False
         return result.returncode == 0
 
-    def _topic_has_message_cached(self, topic: str, timeout_s: float = 0.8, ttl_s: float = 5.0) -> bool:
-        cached = self.topic_probe_cache.get(topic)
+    def _topic_has_message_cached(
+        self,
+        topic: str,
+        topic_type: str = "",
+        timeout_s: float = 0.8,
+        ttl_s: float = 5.0,
+    ) -> bool:
+        cache_key = f"{topic}|{topic_type}"
+        cached = self.topic_probe_cache.get(cache_key)
         now = time.time()
         if cached is not None:
             ts, value = cached
             if (now - ts) < ttl_s:
                 return value
-        value = self._topic_has_message(topic, timeout_s=timeout_s)
-        self.topic_probe_cache[topic] = (now, value)
+        value = self._topic_has_message(topic, topic_type=topic_type, timeout_s=timeout_s)
+        self.topic_probe_cache[cache_key] = (now, value)
         return value
 
     def _run_validation(self, config: dict[str, Any]) -> None:
@@ -578,26 +598,26 @@ class OperatorConsoleBackend:
         active_arms = self._active_arm_list(config)
         if active_arms:
             spark_topic = f"/Spark_angle/{active_arms[0]}"
-            if not self._topic_has_message(spark_topic, timeout_s=2.5):
+            if not self._topic_has_message(spark_topic, topic_type="std_msgs/msg/Float32MultiArray", timeout_s=2.5):
                 errors.append(f"Timed out waiting for Spark stream: {spark_topic}")
             robot_topic = f"/spark/{active_arms[0]}/robot/joint_state"
-            if not self._topic_has_message(robot_topic, timeout_s=2.5):
+            if not self._topic_has_message(robot_topic, topic_type="sensor_msgs/msg/JointState", timeout_s=2.5):
                 errors.append(f"Timed out waiting for robot state: {robot_topic}")
         if config.get("realsense_enabled", True):
             for topic in [
                 "/spark/cameras/wrist/color/image_raw",
                 "/spark/cameras/scene/color/image_raw",
             ]:
-                if not self._topic_has_message(topic, timeout_s=2.5):
+                if not self._topic_has_message(topic, topic_type="sensor_msgs/msg/Image", timeout_s=2.5):
                     errors.append(f"Timed out waiting for camera stream: {topic}")
         if config.get("gelsight_enabled", False):
             if config.get("gelsight_enable_left", False):
                 topic = "/spark/tactile/left/color/image_raw"
-                if not self._topic_has_message(topic, timeout_s=2.5):
+                if not self._topic_has_message(topic, topic_type="sensor_msgs/msg/Image", timeout_s=2.5):
                     errors.append(f"Timed out waiting for tactile stream: {topic}")
             if config.get("gelsight_enable_right", False):
                 topic = "/spark/tactile/right/color/image_raw"
-                if not self._topic_has_message(topic, timeout_s=2.5):
+                if not self._topic_has_message(topic, topic_type="sensor_msgs/msg/Image", timeout_s=2.5):
                     errors.append(f"Timed out waiting for tactile stream: {topic}")
         return errors
 

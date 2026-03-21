@@ -789,3 +789,23 @@
 - Re-ran the same smoke checks:
   - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
   - `timeout 5s python3 data_pipeline/operator_console.py`
+
+### Operator Console ROS-native stream probe
+
+- Replaced the console's representative-message probe path:
+  - removed reliance on `ros2 topic echo --once` for health and validate checks
+  - added `data_pipeline/ros_topic_probe.py`, a small ROS-native one-shot subscriber probe using `rclpy`
+- Wired the backend health cache and `Validate` path to use that probe instead of the slower CLI echo path.
+- Reason:
+  - the CLI echo path was producing repeated false negatives on image and startup-sensitive topics
+  - that made healthy SPARK and RealSense services stay yellow even after they were actually streaming
+- Real backend validation result with the full `lightning_d405_d455_left_gelsight` preset:
+  - SPARK: healthy
+  - Teleop: healthy
+  - RealSense: healthy
+  - GelSight: healthy
+  - session state reached `ready_for_dry_run`
+  - `Validate` passed and reported the expected `11` bag topics for the Lightning+tactile configuration
+- Important nuance from the logs:
+  - the Teleop process still emitted an early Tk callback traceback around gripper activation
+  - but by the end of the probe window the required Lightning robot and teleop topics were flowing, so the console correctly treated Teleop as healthy for readiness purposes
