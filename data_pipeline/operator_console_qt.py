@@ -1,0 +1,642 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+try:
+    from PySide6.QtCore import QTimer, Qt
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import (
+        QApplication,
+        QCheckBox,
+        QComboBox,
+        QFormLayout,
+        QFrame,
+        QGridLayout,
+        QGroupBox,
+        QHBoxLayout,
+        QLabel,
+        QLineEdit,
+        QMainWindow,
+        QPushButton,
+        QPlainTextEdit,
+        QSizePolicy,
+        QSplitter,
+        QVBoxLayout,
+        QWidget,
+    )
+except ModuleNotFoundError as exc:  # pragma: no cover - runtime guard only
+    print(
+        "PySide6 is not installed. Activate .venv and run: "
+        "pip install -r data_pipeline/requirements-operator-console.txt",
+        file=sys.stderr,
+    )
+    raise SystemExit(1) from exc
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from data_pipeline.operator_console_backend import OperatorConsoleBackend
+
+
+STATUS_STYLES = {
+    "green": "background:#d7f2df;color:#15371e;border:1px solid #8ab79a;",
+    "yellow": "background:#fff3c4;color:#5b4a06;border:1px solid #d8c670;",
+    "red": "background:#f8d6d6;color:#5b1818;border:1px solid #d39b9b;",
+    "off": "background:#eceff2;color:#495057;border:1px solid #cbd3db;",
+}
+
+
+class HealthCard(QFrame):
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("healthCard")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("cardTitle")
+        title_row.addWidget(self.title_label)
+        title_row.addStretch(1)
+        layout.addLayout(title_row)
+
+        self.summary_label = QLabel("Unknown")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setObjectName("cardSummary")
+        self.summary_label.setMinimumHeight(34)
+        self.summary_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.summary_label)
+
+        self.details_label = QLabel("")
+        self.details_label.setWordWrap(True)
+        self.details_label.setObjectName("cardDetails")
+        layout.addWidget(self.details_label)
+
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 2, 0, 0)
+        button_row.setSpacing(8)
+        self.primary_button = QPushButton("Start")
+        self.secondary_button = QPushButton("Stop")
+        button_row.addWidget(self.primary_button)
+        button_row.addWidget(self.secondary_button)
+        layout.addLayout(button_row)
+
+    def set_status(self, status: str, summary: str, details: list[str]) -> None:
+        self.summary_label.setText(summary)
+        self.summary_label.setStyleSheet(
+            STATUS_STYLES.get(status, STATUS_STYLES["off"]) + "border-radius:10px;padding:8px 10px;"
+        )
+        self.details_label.setText("\n".join(details) if details else "")
+
+
+class OperatorConsoleQtWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.backend = OperatorConsoleBackend()
+        self.setWindowTitle("Operator Console")
+        self.resize(1820, 1040)
+
+        self.last_log_render = ""
+        self.last_output_render = ""
+
+        self.form_widgets: dict[str, QLineEdit | QComboBox | QCheckBox] = {}
+        self.health_cards: dict[str, HealthCard] = {}
+
+        self._build_ui()
+        self._apply_styles()
+        self._load_first_preset()
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start(1000)
+        self._tick()
+
+    def _build_ui(self) -> None:
+        central = QWidget()
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(12, 12, 12, 12)
+        root_layout.setSpacing(12)
+        self.setCentralWidget(central)
+
+        header = QFrame()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(6, 2, 6, 2)
+        title = QLabel("Operator Console")
+        title_font = QFont()
+        title_font.setPointSize(20)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        header_layout.addWidget(title)
+        header_layout.addStretch(1)
+
+        state_column = QVBoxLayout()
+        state_column.setSpacing(2)
+        self.session_state_label = QLabel("State: idle")
+        self.session_state_label.setObjectName("headerState")
+        self.validation_state_label = QLabel("Validation: not_run")
+        self.validation_state_label.setObjectName("headerSubstate")
+        state_column.addWidget(self.session_state_label, alignment=Qt.AlignmentFlag.AlignRight)
+        state_column.addWidget(self.validation_state_label, alignment=Qt.AlignmentFlag.AlignRight)
+        header_layout.addLayout(state_column)
+        root_layout.addWidget(header)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        root_layout.addWidget(splitter, 1)
+
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
+        left_layout.addWidget(self._build_form_panel(), 1)
+        splitter.addWidget(left_panel)
+
+        center_panel = QWidget()
+        center_layout = QVBoxLayout(center_panel)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(12)
+        center_layout.addWidget(self._build_health_panel(), 1)
+        splitter.addWidget(center_panel)
+
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+        right_layout.addWidget(self._build_command_panel())
+        right_layout.addWidget(self._build_logs_panel(), 1)
+        right_layout.addWidget(self._build_output_panel(), 1)
+        splitter.addWidget(right_panel)
+
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(2, 1)
+        splitter.setSizes([510, 480, 760])
+
+    def _build_form_panel(self) -> QWidget:
+        box = QGroupBox("Session")
+        layout = QVBoxLayout(box)
+        layout.setSpacing(12)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self.preset_combo = QComboBox()
+        for preset_id, _label in self.backend.list_presets():
+            self.preset_combo.addItem(preset_id)
+        self.preset_combo.currentTextChanged.connect(self._apply_preset)
+        form.addRow("Preset", self.preset_combo)
+
+        self.form_widgets["dataset_id"] = QLineEdit()
+        self.form_widgets["robot_id"] = QLineEdit()
+        self.form_widgets["task_name"] = QLineEdit()
+        self.form_widgets["language_instruction"] = QLineEdit()
+        self.form_widgets["operator"] = QLineEdit(os.environ.get("USER", ""))
+        active_arms = QComboBox()
+        active_arms.addItems(["lightning", "thunder", "lightning,thunder"])
+        self.form_widgets["active_arms"] = active_arms
+        self.form_widgets["sensors_file"] = QLineEdit("data_pipeline/configs/sensors.local.yaml")
+        self.form_widgets["wrist_serial_no"] = QLineEdit()
+        self.form_widgets["scene_serial_no"] = QLineEdit()
+        self.form_widgets["gelsight_left_device_path"] = QLineEdit()
+        self.form_widgets["viewer_base_url"] = QLineEdit("http://10.33.55.65:3000")
+        self.form_widgets["notes"] = QLineEdit()
+        self.form_widgets["extra_topics"] = QLineEdit()
+
+        for label, key in [
+            ("Dataset ID", "dataset_id"),
+            ("Robot ID", "robot_id"),
+            ("Task Name", "task_name"),
+            ("Language", "language_instruction"),
+            ("Operator", "operator"),
+            ("Active Arms", "active_arms"),
+            ("Sensors File", "sensors_file"),
+            ("Wrist Serial", "wrist_serial_no"),
+            ("Scene Serial", "scene_serial_no"),
+            ("GelSight Left Path", "gelsight_left_device_path"),
+            ("Viewer Base URL", "viewer_base_url"),
+            ("Notes", "notes"),
+            ("Extra Topics", "extra_topics"),
+        ]:
+            form.addRow(label, self.form_widgets[key])
+
+        gelsight_checkbox = QCheckBox("Enable GelSight")
+        self.form_widgets["gelsight_enabled"] = gelsight_checkbox
+        form.addRow("", gelsight_checkbox)
+
+        layout.addLayout(form)
+
+        button_grid = QGridLayout()
+        button_grid.setContentsMargins(0, 0, 0, 0)
+        button_grid.setSpacing(8)
+        self.start_session_button = QPushButton("Start Session")
+        self.start_session_button.clicked.connect(self._start_session)
+        self.stop_session_button = QPushButton("Stop Session")
+        self.stop_session_button.clicked.connect(self._stop_session)
+        self.validate_button = QPushButton("Validate")
+        self.validate_button.clicked.connect(self._validate)
+        button_grid.addWidget(self.start_session_button, 0, 0)
+        button_grid.addWidget(self.stop_session_button, 0, 1)
+        button_grid.addWidget(self.validate_button, 1, 0)
+        layout.addLayout(button_grid)
+
+        artifacts_box = QGroupBox("Latest Artifacts")
+        artifacts_layout = QFormLayout(artifacts_box)
+        artifacts_layout.setSpacing(8)
+        self.latest_episode_label = QLabel("")
+        self.latest_episode_label.setWordWrap(True)
+        self.latest_dataset_label = QLabel("")
+        self.latest_dataset_label.setWordWrap(True)
+        self.latest_viewer_label = QLabel("")
+        self.latest_viewer_label.setWordWrap(True)
+        artifacts_layout.addRow("Episode", self.latest_episode_label)
+        artifacts_layout.addRow("Dataset", self.latest_dataset_label)
+        artifacts_layout.addRow("Viewer", self.latest_viewer_label)
+        layout.addWidget(artifacts_box)
+        layout.addStretch(1)
+        return box
+
+    def _build_health_panel(self) -> QWidget:
+        box = QGroupBox("Subsystem Health")
+        layout = QVBoxLayout(box)
+        layout.setSpacing(10)
+        for name in ["spark_devices", "teleop_gui", "realsense_contract", "gelsight_contract", "recorder", "converter"]:
+            card = HealthCard(name.replace("_", " ").title())
+            card.primary_button.clicked.connect(lambda _checked=False, process=name: self._start_named_process(process))
+            card.secondary_button.clicked.connect(lambda _checked=False, process=name: self._stop_named_process(process))
+            self.health_cards[name] = card
+            layout.addWidget(card)
+        layout.addStretch(1)
+        return box
+
+    def _build_command_panel(self) -> QWidget:
+        box = QGroupBox("Selected Process Command")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.command_label = QLabel("")
+        self.command_label.setWordWrap(True)
+        self.command_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.command_label)
+        return box
+
+    def _build_logs_panel(self) -> QWidget:
+        box = QGroupBox("Process Logs")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.log_process_combo = QComboBox()
+        for name in self.backend.processes.keys():
+            self.log_process_combo.addItem(name)
+        layout.addWidget(self.log_process_combo)
+        self.log_text = QPlainTextEdit()
+        self.log_text.setReadOnly(True)
+        layout.addWidget(self.log_text, 1)
+        return box
+
+    def _build_output_panel(self) -> QWidget:
+        box = QGroupBox("Action Output")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.output_text = QPlainTextEdit()
+        self.output_text.setReadOnly(True)
+        layout.addWidget(self.output_text, 1)
+        return box
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet(
+            """
+            QMainWindow {
+                background: #f6f7fb;
+            }
+            QGroupBox {
+                font-weight: 600;
+                border: 1px solid #d8dde6;
+                border-radius: 14px;
+                margin-top: 10px;
+                background: #ffffff;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 14px;
+                padding: 0 4px;
+                color: #223044;
+            }
+            QFrame#healthCard {
+                background: #fbfcfe;
+                border: 1px solid #dde3ec;
+                border-radius: 16px;
+            }
+            QLabel#cardTitle {
+                font-size: 15px;
+                font-weight: 700;
+                color: #1f2a37;
+            }
+            QLabel#cardDetails {
+                color: #556372;
+            }
+            QLabel#headerState {
+                font-size: 16px;
+                font-weight: 700;
+                color: #1f2a37;
+            }
+            QLabel#headerSubstate {
+                color: #5d6a79;
+            }
+            QLineEdit, QComboBox, QPlainTextEdit {
+                border: 1px solid #cfd6e1;
+                border-radius: 10px;
+                padding: 8px 10px;
+                background: #ffffff;
+            }
+            QPushButton {
+                min-height: 34px;
+                border: 1px solid #c9d4e2;
+                border-radius: 10px;
+                background: #ffffff;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background: #eef4ff;
+            }
+            QPushButton:disabled {
+                color: #9aa3af;
+                background: #f5f6f8;
+            }
+            """
+        )
+
+    def _load_first_preset(self) -> None:
+        if self.preset_combo.count() == 0:
+            return
+        self._apply_preset(self.preset_combo.currentText())
+
+    def _apply_preset(self, preset_id: str) -> None:
+        if not preset_id:
+            return
+        preset = self.backend.get_preset(preset_id)
+        self._set_field("dataset_id", str(preset.get("dataset_id", "")))
+        self._set_field("robot_id", str(preset.get("robot_id", "")))
+        self._set_field("task_name", str(preset.get("task_name", "")))
+        self._set_field("language_instruction", str(preset.get("language_instruction", "")))
+        if preset.get("operator"):
+            self._set_field("operator", str(preset.get("operator", "")))
+        self._set_field("active_arms", str(preset.get("active_arms", "lightning")))
+        self._set_field("sensors_file", str(preset.get("sensors_file", "data_pipeline/configs/sensors.local.yaml")))
+        self._set_field("wrist_serial_no", str(preset.get("realsense", {}).get("wrist_serial_no", "")))
+        self._set_field("scene_serial_no", str(preset.get("realsense", {}).get("scene_serial_no", "")))
+        self._set_field("gelsight_enabled", bool(preset.get("gelsight", {}).get("enabled", False)))
+        self._set_field("gelsight_left_device_path", str(preset.get("gelsight", {}).get("left_device_path", "")))
+        self._set_field("viewer_base_url", str(preset.get("viewer_base_url", "")))
+        self._set_field("notes", "")
+        self._set_field("extra_topics", "")
+
+    def _set_field(self, key: str, value: str | bool) -> None:
+        widget = self.form_widgets[key]
+        if isinstance(widget, QLineEdit):
+            widget.setText(str(value))
+        elif isinstance(widget, QComboBox):
+            index = widget.findText(str(value))
+            if index >= 0:
+                widget.setCurrentIndex(index)
+            else:
+                widget.setEditText(str(value))
+        elif isinstance(widget, QCheckBox):
+            widget.setChecked(bool(value))
+
+    def _get_field(self, key: str) -> str | bool:
+        widget = self.form_widgets[key]
+        if isinstance(widget, QLineEdit):
+            return widget.text().strip()
+        if isinstance(widget, QComboBox):
+            return widget.currentText().strip()
+        if isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        raise TypeError(f"Unsupported widget type for {key}")
+
+    def _config(self) -> dict[str, object]:
+        return {
+            "preset_id": self.preset_combo.currentText().strip(),
+            "dataset_id": self._get_field("dataset_id"),
+            "robot_id": self._get_field("robot_id"),
+            "task_name": self._get_field("task_name"),
+            "language_instruction": self._get_field("language_instruction"),
+            "operator": self._get_field("operator"),
+            "active_arms": self._get_field("active_arms"),
+            "sensors_file": self._get_field("sensors_file"),
+            "wrist_serial_no": self._get_field("wrist_serial_no"),
+            "scene_serial_no": self._get_field("scene_serial_no"),
+            "realsense_enabled": True,
+            "gelsight_enabled": bool(self._get_field("gelsight_enabled")),
+            "gelsight_enable_left": bool(self._get_field("gelsight_enabled")),
+            "gelsight_enable_right": False,
+            "gelsight_left_device_path": self._get_field("gelsight_left_device_path"),
+            "gelsight_right_device_path": "",
+            "viewer_base_url": self._get_field("viewer_base_url"),
+            "notes": self._get_field("notes"),
+            "extra_topics": self._get_field("extra_topics"),
+        }
+
+    def _start_session(self) -> None:
+        self.backend.start_session(self._config())
+
+    def _stop_session(self) -> None:
+        self.backend.stop_session()
+
+    def _validate(self) -> None:
+        self.backend.start_validation(self._config())
+
+    def _start_recording(self) -> None:
+        self.backend.start_recording(self._config())
+
+    def _stop_recording(self) -> None:
+        self.backend.stop_recording()
+
+    def _convert_latest(self) -> None:
+        self.backend.start_conversion(self._config())
+
+    def _open_viewer(self) -> None:
+        self.backend.open_viewer(self._config())
+
+    def _start_named_process(self, name: str) -> None:
+        self.backend.start_named_process(name, self._config())
+
+    def _stop_named_process(self, name: str) -> None:
+        self.backend.stop_named_process(name)
+
+    def _tick(self) -> None:
+        config = self._config()
+        self.backend.request_health_refresh(config)
+        snapshot = self.backend.snapshot(config)
+        self.session_state_label.setText(f"State: {snapshot.get('session_state', 'idle')}")
+        self.validation_state_label.setText(f"Validation: {snapshot.get('validation_state', 'not_run')}")
+        self.latest_episode_label.setText(snapshot.get("latest_episode_id") or "")
+        self.latest_dataset_label.setText(snapshot.get("latest_dataset_id") or "")
+        self.latest_viewer_label.setText(snapshot.get("latest_viewer_url") or "")
+        self._render_health(snapshot.get("health", {}))
+        self._render_logs(snapshot)
+        self._render_output(snapshot)
+        self._update_button_states(snapshot)
+
+    def _render_health(self, health: dict[str, dict[str, object]]) -> None:
+        for name, card in self.health_cards.items():
+            status_card = health.get(name, {"status": "off", "summary": "Unknown", "details": []})
+            card.set_status(
+                str(status_card.get("status", "off")),
+                str(status_card.get("summary", "Unknown")),
+                list(status_card.get("details", [])),
+            )
+
+    def _render_logs(self, snapshot: dict[str, object]) -> None:
+        selected = self.log_process_combo.currentText().strip() or "spark_devices"
+        logs = self.backend.get_process_logs(selected)
+        rendered = "\n".join(logs[-200:])
+        process = snapshot.get("processes", {}).get(selected, {})
+        self.command_label.setText(str(process.get("command", "")))
+        if rendered == self.last_log_render:
+            return
+        self.last_log_render = rendered
+        self.log_text.setPlainText(rendered)
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _render_output(self, snapshot: dict[str, object]) -> None:
+        lines = [
+            f"Session state: {snapshot.get('session_state', 'idle')}",
+            f"Validation state: {snapshot.get('validation_state', 'not_run')}",
+            "",
+        ]
+        if snapshot.get("last_action_error"):
+            lines.extend(["Last error:", str(snapshot["last_action_error"]), ""])
+        if snapshot.get("last_validation_output"):
+            lines.extend(["Validate output:", str(snapshot["last_validation_output"]), ""])
+        if snapshot.get("latest_recording_check_output"):
+            lines.extend(["Recording check:", str(snapshot["latest_recording_check_output"]), ""])
+        if snapshot.get("latest_conversion_output"):
+            lines.extend(["Convert output:", str(snapshot["latest_conversion_output"])])
+        rendered = "\n".join(lines).strip()
+        if rendered == self.last_output_render:
+            return
+        self.last_output_render = rendered
+        self.output_text.setPlainText(rendered)
+        scrollbar = self.output_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _update_button_states(self, snapshot: dict[str, object]) -> None:
+        config = self._config()
+        session_state = str(snapshot.get("session_state", "idle"))
+        validation_state = str(snapshot.get("validation_state", "not_run"))
+        ready = session_state in {"ready_for_dry_run", "ready_to_record", "recorded", "converted", "review_ready"}
+        can_record = validation_state == "passed" and session_state in {"ready_to_record", "recorded", "converted", "review_ready"}
+        processes = snapshot.get("processes", {})
+        recorder_state = str(processes.get("recorder", {}).get("state", "stopped"))
+        converter_state = str(processes.get("converter", {}).get("state", "stopped"))
+        recording_ready = bool(snapshot.get("latest_episode_id")) and snapshot.get("latest_recording_ok") is True
+        recording_check_running = bool(snapshot.get("recording_check_running"))
+        viewer_available = self.backend.viewer_target_available(config)
+        session_running = any(
+            str(processes.get(name, {}).get("state", "stopped")) in {"running", "starting", "stopping", "failed"}
+            for name in ("spark_devices", "teleop_gui", "realsense_contract", "gelsight_contract", "recorder", "converter")
+        )
+
+        self.start_session_button.setEnabled(not session_running)
+        self.stop_session_button.setEnabled(session_running)
+        self.validate_button.setEnabled((ready or session_state == "bringing_up") and validation_state != "running")
+
+        for name, card in self.health_cards.items():
+            state = str(processes.get(name, {}).get("state", "stopped"))
+            start_enabled = state not in {"running", "starting", "stopping"}
+            stop_enabled = state in {"running", "starting", "failed"}
+
+            if name == "gelsight_contract" and not bool(self._get_field("gelsight_enabled")):
+                start_enabled = False
+                stop_enabled = False
+
+            if name == "recorder":
+                self._update_recorder_card(card, recorder_state, can_record, recording_check_running)
+                continue
+            if name == "converter":
+                self._update_converter_card(card, converter_state, recording_ready, viewer_available)
+                continue
+
+            card.primary_button.setText("Start")
+            card.primary_button.clicked.disconnect() if False else None
+            card.primary_button.setEnabled(start_enabled)
+            card.secondary_button.setText("Stop")
+            card.secondary_button.setEnabled(stop_enabled)
+
+    def _update_recorder_card(self, card: HealthCard, recorder_state: str, can_record: bool, recording_check_running: bool) -> None:
+        card.primary_button.clicked.disconnect() if False else None
+        card.secondary_button.clicked.disconnect() if False else None
+        self._rebind_button(card.primary_button, "Record", self._start_recording)
+        self._rebind_button(card.secondary_button, "Stop", self._stop_recording)
+        if recorder_state == "running":
+            card.primary_button.setEnabled(False)
+            card.secondary_button.setEnabled(True)
+            return
+        if recording_check_running:
+            self._rebind_button(card.primary_button, "Analyzing", self._start_recording)
+            self._rebind_button(card.secondary_button, "Wait", self._stop_recording)
+            card.primary_button.setEnabled(False)
+            card.secondary_button.setEnabled(False)
+            return
+        card.primary_button.setEnabled(bool(can_record))
+        card.secondary_button.setEnabled(False)
+
+    def _update_converter_card(self, card: HealthCard, converter_state: str, recording_ready: bool, viewer_available: bool) -> None:
+        if converter_state == "running":
+            self._rebind_button(card.primary_button, "Convert", self._convert_latest)
+            self._rebind_button(card.secondary_button, "Stop", lambda: self._stop_named_process("converter"))
+            card.primary_button.setEnabled(False)
+            card.secondary_button.setEnabled(True)
+            return
+        if recording_ready:
+            self._rebind_button(card.primary_button, "Convert", self._convert_latest)
+            self._rebind_button(card.secondary_button, "Open Viewer", self._open_viewer)
+            card.primary_button.setEnabled(True)
+            card.secondary_button.setEnabled(bool(viewer_available))
+            return
+        if viewer_available:
+            self._rebind_button(card.primary_button, "Open Viewer", self._open_viewer)
+            self._rebind_button(card.secondary_button, "Stop", lambda: self._stop_named_process("converter"))
+            card.primary_button.setEnabled(True)
+            card.secondary_button.setEnabled(False)
+            return
+        self._rebind_button(card.primary_button, "Convert", self._convert_latest)
+        self._rebind_button(card.secondary_button, "Stop", lambda: self._stop_named_process("converter"))
+        card.primary_button.setEnabled(False)
+        card.secondary_button.setEnabled(False)
+
+    def _rebind_button(self, button: QPushButton, text: str, callback) -> None:
+        try:
+            button.clicked.disconnect()
+        except Exception:
+            pass
+        button.setText(text)
+        button.clicked.connect(callback)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self.backend.stop_session()
+        super().closeEvent(event)
+
+
+def main() -> int:
+    app = QApplication(sys.argv)
+    window = OperatorConsoleQtWindow()
+    window.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

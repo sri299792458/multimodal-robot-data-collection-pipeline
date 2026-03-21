@@ -1163,3 +1163,22 @@
 - Also clarified the migration rule:
   - the current Tk console is a prototype/reference only
   - Qt migration must preserve the same backend supervisor, process model, readiness gates, and operator workflow
+
+### Qt frontend implementation start
+
+- Added a separate Qt frontend implementation at:
+  - `data_pipeline/operator_console_qt.py`
+- Kept the migration boundary clean:
+  - reused the existing `OperatorConsoleBackend`
+  - did not change process orchestration or readiness semantics as part of the frontend switch
+  - left the Tk prototype in place as a fallback/reference during the transition
+- Added a minimal frontend dependency file:
+  - `data_pipeline/requirements-operator-console.txt`
+- Updated `data_pipeline/README.md` so the preferred launch path is now the Qt frontend, with the Tk launcher still documented as a fallback.
+- Installed `PySide6` into the local `.venv` for verification.
+- Validation:
+  - `python3 -m py_compile data_pipeline/operator_console_qt.py`
+  - `source .venv/bin/activate && QT_QPA_PLATFORM=offscreen timeout 5s python data_pipeline/operator_console_qt.py`
+  - result:
+    - the Qt frontend starts and stays up for the smoke window
+    - only the expected offscreen-plugin `propagateSizeHints()` warnings appeared

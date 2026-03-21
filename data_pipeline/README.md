@@ -10,7 +10,15 @@ For the current exact Lightning-only command sequence on this machine, use [docs
 
 For the planned lab-facing capture GUI, use [docs/operator-console-spec.md](./docs/operator-console-spec.md).
 
-An early local prototype of that GUI can be launched with:
+The current reference frontend is the new Qt implementation:
+
+```bash
+source .venv/bin/activate
+pip install -r data_pipeline/requirements-operator-console.txt
+python data_pipeline/operator_console_qt.py
+```
+
+The older Tk prototype is still available as a fallback/reference:
 
 ```bash
 python3 data_pipeline/operator_console.py
