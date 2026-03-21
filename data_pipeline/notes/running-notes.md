@@ -969,3 +969,48 @@
 - Validation:
   - `python3 -m py_compile data_pipeline/operator_console.py data_pipeline/operator_console_backend.py`
   - `timeout 5s python3 data_pipeline/operator_console.py`
+
+### Viewer action resilience
+
+- Found a separate Operator Console weakness around `Open Viewer`:
+  - the button state depended too heavily on the console's in-memory `latest_dataset_id`
+  - so if a dataset already existed on disk, or conversion happened outside the current console process, the viewer action could be unavailable or misleading
+- Tightened the viewer path in `data_pipeline/operator_console_backend.py` and `data_pipeline/operator_console.py`:
+  - `Open Viewer` now resolves the target dataset from disk, preferring the current form `dataset_id` and falling back to the console's latest known dataset
+  - the button now enables when a valid `published/<dataset_id>/meta/info.json` exists for the current config, not only when the current session memory has `latest_dataset_id`
+  - on Linux, the backend now uses `xdg-open` when available, with `webbrowser.open(...)` as fallback
+- Runtime diagnosis from the latest check:
+  - the generated URL was correct:
+    - `http://10.33.55.65:3000/local/spark_multisensor_lightning_tactile_v1/episode_2`
+  - the actual reason it failed was simpler:
+    - no viewer server was running on port `3000`
+- Brought the viewer back up with:
+  - `cd /home/srinivas/Desktop/pipeline/lerobot-dataset-visualizer`
+  - `env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy NEXT_PUBLIC_DATASET_URL=http://10.33.55.65:3000/datasets DATASET_URL=http://localhost:3000/datasets REPO_ID=local/spark_multisensor_lightning_tactile_v1 EPISODES=2 ~/.bun/bin/bun start`
+- Validation after bring-up:
+  - `curl` with proxy vars stripped returned `HTTP/1.1 200 OK` for:
+    - `http://localhost:3000/`
+    - `http://10.33.55.65:3000/`
+  - the specific episode route returned HTML successfully:
+    - `http://localhost:3000/local/spark_multisensor_lightning_tactile_v1/episode_2`
+
+### Open Viewer now owns viewer startup
+
+- Tightened the Operator Console contract for `Open Viewer`:
+  - the user should not be expected to manually start `lerobot-dataset-visualizer`
+  - pressing `Open Viewer` should ensure the server exists, then open the episode URL
+- Implemented this in `data_pipeline/operator_console_backend.py`:
+  - added an on-demand managed process: `viewer_server`
+  - `open_viewer(...)` now:
+    - resolves the dataset and latest episode from `published/<dataset_id>/meta/info.json`
+    - starts `lerobot-dataset-visualizer` automatically if the configured viewer base URL is not already reachable
+    - waits for the server to come up
+    - then opens the URL with `xdg-open` on Linux
+- `data_pipeline/operator_console.py` now enables `Open Viewer` whenever the current config points at a dataset that exists on disk, rather than depending on in-memory conversion state.
+- Validation:
+  - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
+  - backend probe on the tactile dataset returned:
+    - `available=True`
+    - target URL `http://10.33.55.65:3000/local/spark_multisensor_lightning_tactile_v1/episode_2`
+    - `reachable=True`
+  - `timeout 5s python3 data_pipeline/operator_console.py`

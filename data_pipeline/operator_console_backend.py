@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from collections import deque
 from dataclasses import dataclass, field
@@ -32,6 +35,8 @@ SYSTEM_PYTHON = "/usr/bin/python3"
 PRESETS_PATH = REPO_ROOT / "data_pipeline" / "configs" / "operator_console_presets.yaml"
 STATE_DIR = REPO_ROOT / ".operator_console"
 TOPIC_PROBE_SCRIPT = REPO_ROOT / "data_pipeline" / "ros_topic_probe.py"
+VIEWER_REPO = REPO_ROOT / "lerobot-dataset-visualizer"
+VIEWER_BUN = Path.home() / ".bun" / "bin" / "bun"
 
 
 @dataclass
@@ -66,6 +71,7 @@ class OperatorConsoleBackend:
             "gelsight_contract": ManagedProcess("gelsight_contract", "GelSight"),
             "recorder": ManagedProcess("recorder", "Recorder"),
             "converter": ManagedProcess("converter", "Converter"),
+            "viewer_server": ManagedProcess("viewer_server", "Viewer Server"),
         }
         self.process_lock = threading.Lock()
         self.last_health: dict[str, dict[str, Any]] = {}
@@ -273,21 +279,26 @@ class OperatorConsoleBackend:
 
     def open_viewer(self, config: dict[str, Any]) -> None:
         self.last_action_error = ""
-        dataset_id = self.latest_dataset_id or config["dataset_id"]
-        viewer_base_url = str(config.get("viewer_base_url", "")).strip().rstrip("/")
-        if not viewer_base_url:
-            self.last_action_error = "Viewer base URL is empty."
+        try:
+            dataset_id, episode_index, url = self._resolve_viewer_target(config)
+            self._ensure_viewer_server(config, dataset_id, episode_index)
+        except RuntimeError as exc:
+            self.last_action_error = str(exc)
             return
-        info_path = REPO_ROOT / "published" / dataset_id / "meta" / "info.json"
-        if not info_path.exists():
-            self.last_action_error = f"Published dataset info not found: {info_path}"
-            return
-        with info_path.open("r", encoding="utf-8") as handle:
-            info = json.load(handle)
-        episode_index = max(int(info.get("total_episodes", 1)) - 1, 0)
-        url = f"{viewer_base_url}/local/{dataset_id}/episode_{episode_index}"
+        self.latest_dataset_id = dataset_id
         self.latest_viewer_url = url
-        webbrowser.open(url)
+        if shutil.which("xdg-open"):
+            subprocess.Popen(
+                ["xdg-open", url],
+                cwd=str(REPO_ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            opened = webbrowser.open(url)
+            if not opened:
+                self.last_action_error = f"Viewer URL is ready but browser launch failed: {url}"
+                return
         self._record_event("open_viewer", {"url": url})
 
     def request_health_refresh(self, config: dict[str, Any]) -> None:
@@ -318,6 +329,97 @@ class OperatorConsoleBackend:
             }
         finally:
             self.health_refresh_in_flight = False
+
+    def viewer_target_available(self, config: dict[str, Any]) -> bool:
+        return self._find_viewer_dataset_id(config) is not None
+
+    def _viewer_dataset_candidates(self, config: dict[str, Any]) -> list[str]:
+        candidates: list[str] = []
+        config_dataset_id = str(config.get("dataset_id", "")).strip()
+        if config_dataset_id:
+            candidates.append(config_dataset_id)
+        if self.latest_dataset_id and self.latest_dataset_id not in candidates:
+            candidates.append(self.latest_dataset_id)
+        return candidates
+
+    def _find_viewer_dataset_id(self, config: dict[str, Any]) -> str | None:
+        for dataset_id in self._viewer_dataset_candidates(config):
+            info_path = REPO_ROOT / "published" / dataset_id / "meta" / "info.json"
+            if info_path.exists():
+                return dataset_id
+        return None
+
+    def _resolve_viewer_target(self, config: dict[str, Any]) -> tuple[str, int, str]:
+        viewer_base_url = str(config.get("viewer_base_url", "")).strip().rstrip("/")
+        if not viewer_base_url:
+            raise RuntimeError("Viewer base URL is empty.")
+        dataset_id = self._find_viewer_dataset_id(config)
+        if not dataset_id:
+            checked = [
+                str(REPO_ROOT / "published" / dataset_id / "meta" / "info.json")
+                for dataset_id in self._viewer_dataset_candidates(config)
+            ]
+            raise RuntimeError(
+                "Published dataset info not found. Checked: "
+                + (", ".join(checked) if checked else "<no dataset id configured>")
+            )
+        info_path = REPO_ROOT / "published" / dataset_id / "meta" / "info.json"
+        with info_path.open("r", encoding="utf-8") as handle:
+            info = json.load(handle)
+        episode_index = max(int(info.get("total_episodes", 1)) - 1, 0)
+        url = f"{viewer_base_url}/local/{dataset_id}/episode_{episode_index}"
+        return dataset_id, episode_index, url
+
+    def _build_viewer_server_command(self, config: dict[str, Any], dataset_id: str, episode_index: int) -> str:
+        if not VIEWER_REPO.exists():
+            raise RuntimeError(f"Viewer repo not found: {VIEWER_REPO}")
+        if not VIEWER_BUN.exists():
+            raise RuntimeError(f"Bun not found: {VIEWER_BUN}")
+        viewer_base_url = str(config.get("viewer_base_url", "")).strip().rstrip("/")
+        dataset_url = f"{viewer_base_url}/datasets"
+        localhost_dataset_url = "http://localhost:3000/datasets"
+        return (
+            f"cd {shlex.quote(str(VIEWER_REPO))} && "
+            "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY "
+            "-u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy "
+            f"NEXT_PUBLIC_DATASET_URL={shlex.quote(dataset_url)} "
+            f"DATASET_URL={shlex.quote(localhost_dataset_url)} "
+            f"REPO_ID={shlex.quote(f'local/{dataset_id}')} "
+            f"EPISODES={shlex.quote(str(episode_index))} "
+            f"{shlex.quote(str(VIEWER_BUN))} start"
+        )
+
+    def _ensure_viewer_server(self, config: dict[str, Any], dataset_id: str, episode_index: int) -> None:
+        viewer_base_url = str(config.get("viewer_base_url", "")).strip().rstrip("/")
+        if self._url_reachable(viewer_base_url, timeout_s=1.5):
+            return
+
+        command = self._build_viewer_server_command(config, dataset_id, episode_index)
+        process = self.processes["viewer_server"]
+        if process.process is not None and process.process.poll() is None and process.command != command:
+            self._stop_process("viewer_server")
+            deadline = time.time() + 5.0
+            while time.time() < deadline:
+                if process.process is None or process.process.poll() is not None:
+                    break
+                time.sleep(0.1)
+
+        self._start_process("viewer_server", command)
+        deadline = time.time() + 15.0
+        while time.time() < deadline:
+            if self._url_reachable(viewer_base_url, timeout_s=1.5):
+                return
+            time.sleep(0.25)
+        raise RuntimeError(f"Viewer server did not become reachable: {viewer_base_url}")
+
+    def _url_reachable(self, url: str, timeout_s: float = 2.0) -> bool:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        request = urllib.request.Request(url, method="GET")
+        try:
+            with opener.open(request, timeout=timeout_s) as response:
+                return 200 <= int(getattr(response, "status", 200)) < 400
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            return False
 
     def _required_services_healthy(self, config: dict[str, Any]) -> bool:
         required = self._required_service_names(config)

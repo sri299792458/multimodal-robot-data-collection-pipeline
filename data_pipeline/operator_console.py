@@ -379,7 +379,7 @@ class OperatorConsoleApp:
             state="normal" if (ready or session_state == "bringing_up") and validation_state != "running" else "disabled"
         )
         self.viewer_button.configure(
-            state="normal" if snapshot.get("latest_dataset_id") else "disabled"
+            state="normal" if self.backend.viewer_target_available(self._config()) else "disabled"
         )
         for name, widgets in self.health_cards.items():
             _summary_widget, _details_widget, start_button, stop_button = widgets
