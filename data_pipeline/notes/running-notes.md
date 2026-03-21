@@ -946,3 +946,26 @@
     - `--published-root /home/srinivas/Desktop/pipeline/published`
     as separate flags
   - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
+
+### Recorder controls deduplicated
+
+- Removed the duplicate recording/conversion controls from the top-level Session form in `data_pipeline/operator_console.py`.
+- Reason:
+  - after the recorder card became state-aware, the UI had two separate control surfaces for the same recorder actions:
+    - recorder card `Record` / `Stop` / `Convert`
+    - global `Start Recording` / `Stop Recording` / `Convert Latest`
+  - that duplication was unnecessary and made the UI harder to trust
+- New boundary:
+  - Session form now owns only session-level actions:
+    - `Start Session`
+    - `Stop Session`
+    - `Validate`
+    - `Open Viewer`
+  - Recorder card owns recorder-level actions:
+    - `Record`
+    - `Stop`
+    - `Convert`
+    - `Record New`
+- Validation:
+  - `python3 -m py_compile data_pipeline/operator_console.py data_pipeline/operator_console_backend.py`
+  - `timeout 5s python3 data_pipeline/operator_console.py`

@@ -146,14 +146,8 @@ class OperatorConsoleApp:
         self.stop_session_button.grid(row=0, column=1, padx=3, pady=3)
         self.validate_button = tk.Button(buttons, text="Validate", command=self._validate, width=16)
         self.validate_button.grid(row=1, column=0, padx=3, pady=3)
-        self.record_button = tk.Button(buttons, text="Start Recording", command=self._start_recording, width=16)
-        self.record_button.grid(row=1, column=1, padx=3, pady=3)
-        self.stop_record_button = tk.Button(buttons, text="Stop Recording", command=self._stop_recording, width=16)
-        self.stop_record_button.grid(row=2, column=0, padx=3, pady=3)
-        self.convert_button = tk.Button(buttons, text="Convert Latest", command=self._convert_latest, width=16)
-        self.convert_button.grid(row=2, column=1, padx=3, pady=3)
         self.viewer_button = tk.Button(buttons, text="Open Viewer", command=self._open_viewer, width=16)
-        self.viewer_button.grid(row=3, column=0, padx=3, pady=3)
+        self.viewer_button.grid(row=1, column=1, padx=3, pady=3)
 
         row += 1
         info = tk.LabelFrame(form, text="Latest Artifacts")
@@ -383,11 +377,6 @@ class OperatorConsoleApp:
         self.stop_session_button.configure(state="normal" if session_running else "disabled")
         self.validate_button.configure(
             state="normal" if (ready or session_state == "bringing_up") and validation_state != "running" else "disabled"
-        )
-        self.record_button.configure(state="normal" if can_record else "disabled")
-        self.stop_record_button.configure(state="normal" if recorder_state == "running" else "disabled")
-        self.convert_button.configure(
-            state="normal" if recording_ready and converter_state != "running" else "disabled"
         )
         self.viewer_button.configure(
             state="normal" if snapshot.get("latest_dataset_id") else "disabled"
