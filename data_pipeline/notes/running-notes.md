@@ -1303,3 +1303,22 @@
 - Result:
   - the Qt app can now be terminated from the terminal with `Ctrl+C`
   - backend cleanup still goes through the normal window/application shutdown path
+
+### Experimental Qt v2 frontend
+
+- Started a frontend-only redesign in a separate file:
+  - `data_pipeline/operator_console_qt_v2.py`
+- Kept the backend contract unchanged:
+  - same `OperatorConsoleBackend`
+  - same config shape
+  - same process/action methods
+- The new layout is workflow-first rather than form-first:
+  - left: setup and sensor inputs
+  - center: primary actions, run summary, subsystem grid
+  - right: tabbed details for logs, output, and artifacts
+- Important safety choice:
+  - the original Qt frontend remains intact
+  - v2 is a parallel frontend for visual iteration, not a replacement yet
+- Smoke result:
+  - `QT_QPA_PLATFORM=offscreen timeout 5s python data_pipeline/operator_console_qt_v2.py`
+  - app starts and stays up for the timeout window with only the expected offscreen Qt warning
