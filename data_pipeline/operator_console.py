@@ -337,6 +337,9 @@ class OperatorConsoleApp:
 
     def _render_output(self, snapshot: dict[str, object]) -> None:
         lines = []
+        lines.append(f"Session state: {snapshot.get('session_state', 'idle')}")
+        lines.append(f"Validation state: {snapshot.get('validation_state', 'not_run')}")
+        lines.append("")
         if snapshot.get("last_action_error"):
             lines.append("Last error:")
             lines.append(str(snapshot["last_action_error"]))
@@ -366,8 +369,16 @@ class OperatorConsoleApp:
         processes = snapshot.get("processes", {})
         recorder_state = processes.get("recorder", {}).get("state")
         converter_state = processes.get("converter", {}).get("state")
+        session_running = any(
+            str(processes.get(name, {}).get("state", "stopped")) in {"running", "starting", "stopping", "failed"}
+            for name in ("spark_devices", "teleop_gui", "realsense_contract", "gelsight_contract", "recorder")
+        )
 
-        self.validate_button.configure(state="normal" if ready or session_state == "bringing_up" else "disabled")
+        self.start_session_button.configure(state="normal" if not session_running else "disabled")
+        self.stop_session_button.configure(state="normal" if session_running else "disabled")
+        self.validate_button.configure(
+            state="normal" if (ready or session_state == "bringing_up") and validation_state != "running" else "disabled"
+        )
         self.record_button.configure(state="normal" if can_record else "disabled")
         self.stop_record_button.configure(state="normal" if recorder_state == "running" else "disabled")
         self.convert_button.configure(

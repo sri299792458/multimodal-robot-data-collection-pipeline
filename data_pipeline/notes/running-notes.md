@@ -778,3 +778,14 @@
   - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
   - `timeout 5s python3 data_pipeline/operator_console.py`
   - both passed without Tk/runtime errors
+
+### Operator Console button-state tightening
+
+- Followed up immediately on the first controls pass to make the UI harder to misuse:
+  - `Start Session` now disables once the session is already up or bringing up
+  - `Stop Session` disables when nothing session-level is active
+  - `Validate` disables while a validation run is already in progress
+- Also mirrored the current session state and validation state into the Action Output pane so operators do not have to infer them only from the header or button enablement.
+- Re-ran the same smoke checks:
+  - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
+  - `timeout 5s python3 data_pipeline/operator_console.py`
