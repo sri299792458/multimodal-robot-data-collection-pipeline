@@ -1361,3 +1361,18 @@
 - Re-rendered the window after the change and confirmed:
   - `Latest Artifacts` is visible in the default 1080p composition
   - the default view reads more like an operator workflow and less like a config dump
+
+### Qt combo box text overlap fix
+
+- A screenshot review caught a real styling bug in the Qt frontend:
+  - combo-box selected text was being covered by a white subcontrol area
+  - this was most visible in the `Preset` field
+- Root cause:
+  - the custom stylesheet was forcing `QComboBox` too far away from the native control rendering
+- Fixed it narrowly in `data_pipeline/operator_console_qt.py` by:
+  - dropping the custom combo-box chrome rules
+  - keeping only the popup list styling
+- Re-rendered the UI afterward and confirmed:
+  - selected combo-box text is visible
+  - the native arrow is back
+  - the white overlay bug is gone

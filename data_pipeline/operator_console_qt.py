@@ -419,11 +419,17 @@ class OperatorConsoleQtWindow(QMainWindow):
                 font-weight: 600;
                 color: #5d6a79;
             }
-            QLineEdit, QComboBox, QPlainTextEdit {
+            QLineEdit, QPlainTextEdit {
                 border: 1px solid #cfd6e1;
                 border-radius: 10px;
                 padding: 8px 10px;
                 background: #ffffff;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #cfd6e1;
+                background: #ffffff;
+                selection-background-color: #edf4ff;
+                selection-color: #1f2a37;
             }
             QPushButton {
                 min-height: 34px;
