@@ -1104,3 +1104,23 @@
 - Validation:
   - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
   - `timeout 5s python3 data_pipeline/operator_console.py`
+
+### SPARK health simplification
+
+- Follow-up simplification after reviewing the semantics of the SPARK health check:
+  - removed `/Spark_enable/{arm}` from the SPARK sample-topic requirement
+  - kept it only in the required-topic presence list
+- Reason:
+  - the useful part of the previous fix was the shorter probe cache and recovery hold
+  - using `Spark_enable` as an additional liveness sample made the rule harder to explain without adding real value for alignment readiness
+- Current SPARK behavior is now:
+  - required topics:
+    - `/Spark_angle/{arm}`
+    - `/Spark_enable/{arm}`
+  - readiness sample:
+    - `/Spark_angle/{arm}` only
+  - plus:
+    - `0.5s` sample cache TTL
+    - `3s` recovery hold before returning to green
+- Validation:
+  - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`

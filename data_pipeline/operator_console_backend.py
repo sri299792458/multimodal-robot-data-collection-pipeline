@@ -453,7 +453,7 @@ class OperatorConsoleBackend:
         sample_topics = []
         for arm in arms:
             required_topics.extend([f"/Spark_angle/{arm}", f"/Spark_enable/{arm}"])
-            sample_topics.extend([f"/Spark_angle/{arm}", f"/Spark_enable/{arm}"])
+            sample_topics.append(f"/Spark_angle/{arm}")
         return self._build_health_card(
             process_name="spark_devices",
             live_topics=live_topics,
