@@ -1014,3 +1014,18 @@
     - target URL `http://10.33.55.65:3000/local/spark_multisensor_lightning_tactile_v1/episode_2`
     - `reachable=True`
   - `timeout 5s python3 data_pipeline/operator_console.py`
+
+### Viewer launch path simplified
+
+- After the viewer-startup fix, revisited the browser-launch code in `data_pipeline/operator_console_backend.py`.
+- Kept the code minimal:
+  - removed the extra `webbrowser.open(...)` fallback path
+  - kept only the Linux-native `xdg-open` launch path that this machine already has
+- Reason:
+  - for the actual incident, the root cause was that the server was not running
+  - the browser-launch fallback was not part of the required fix
+  - keeping both launch paths only added unnecessary branching
+- Validation:
+  - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
+  - viewer target resolution for the tactile dataset still returns:
+    - `('spark_multisensor_lightning_tactile_v1', 2, 'http://10.33.55.65:3000/local/spark_multisensor_lightning_tactile_v1/episode_2')`

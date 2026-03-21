@@ -12,7 +12,6 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import webbrowser
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -287,18 +286,15 @@ class OperatorConsoleBackend:
             return
         self.latest_dataset_id = dataset_id
         self.latest_viewer_url = url
-        if shutil.which("xdg-open"):
-            subprocess.Popen(
-                ["xdg-open", url],
-                cwd=str(REPO_ROOT),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        else:
-            opened = webbrowser.open(url)
-            if not opened:
-                self.last_action_error = f"Viewer URL is ready but browser launch failed: {url}"
-                return
+        if not shutil.which("xdg-open"):
+            self.last_action_error = "xdg-open is not available on this system."
+            return
+        subprocess.Popen(
+            ["xdg-open", url],
+            cwd=str(REPO_ROOT),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         self._record_event("open_viewer", {"url": url})
 
     def request_health_refresh(self, config: dict[str, Any]) -> None:
