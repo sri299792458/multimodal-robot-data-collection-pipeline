@@ -834,3 +834,20 @@
 - Validated the new behavior directly against the known-bad smoke episode:
   - recorder health becomes `Last recording incomplete`
   - the two zero-message teleop command topics are surfaced explicitly
+
+### Converter runtime fix
+
+- Hit a separate usability bug while converting a real episode from shell:
+  - running `.venv/bin/python data_pipeline/convert_episode_bag_to_lerobot.py ...` without ROS sourced fails with `ModuleNotFoundError: rosbag2_py`
+- Confirmed this is only a shell/runtime issue:
+  - `.venv` can import `rosbag2_py` correctly once `/opt/ros/jazzy/setup.bash` is sourced
+- Fixed the console and docs accordingly:
+  - `data_pipeline/operator_console_backend.py` now sources ROS before launching `convert_episode_bag_to_lerobot.py`
+  - updated conversion command examples in:
+    - `data_pipeline/README.md`
+    - `data_pipeline/docs/hardware-bringup.md`
+    - `data_pipeline/docs/current-lightning-gelsight-runbook.md`
+- Re-tested conversion on `episode-20260320-232548` with ROS sourced:
+  - the `rosbag2_py` import issue is gone
+  - conversion now fails for the real data reason:
+    - missing required teleop command topics `/spark/lightning/teleop/cmd_joint_state` and `/spark/lightning/teleop/cmd_gripper_state`

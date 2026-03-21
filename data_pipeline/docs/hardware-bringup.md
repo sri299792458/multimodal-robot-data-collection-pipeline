@@ -321,6 +321,7 @@ What to look for:
 In a converter terminal:
 
 ```bash
+source /opt/ros/jazzy/setup.bash
 source .venv/bin/activate
 python data_pipeline/convert_episode_bag_to_lerobot.py \
   raw_episodes/<episode_id> \

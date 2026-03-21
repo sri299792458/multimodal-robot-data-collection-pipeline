@@ -183,6 +183,7 @@ ls -td raw_episodes/* | head -n 3
 Convert:
 
 ```bash
+source /opt/ros/jazzy/setup.bash
 source /home/srinivas/Desktop/pipeline/.venv/bin/activate
 python /home/srinivas/Desktop/pipeline/data_pipeline/convert_episode_bag_to_lerobot.py \
   /home/srinivas/Desktop/pipeline/raw_episodes/<episode_id> \

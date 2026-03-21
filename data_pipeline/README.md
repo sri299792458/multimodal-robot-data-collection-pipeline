@@ -161,6 +161,7 @@ Each episode is written under `raw_episodes/<episode_id>/` with:
 Convert one episode:
 
 ```bash
+source /opt/ros/jazzy/setup.bash
 source .venv/bin/activate
 python data_pipeline/convert_episode_bag_to_lerobot.py \
   raw_episodes/<episode_id> \

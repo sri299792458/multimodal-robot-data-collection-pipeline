@@ -796,6 +796,7 @@ class OperatorConsoleBackend:
         episode_dir = REPO_ROOT / "raw_episodes" / episode_id
         published_root = REPO_ROOT / "published"
         return (
+            f"source {shlex.quote(ROS_SETUP)} && "
             f"{shlex.quote(str(CONVERTER_PYTHON))} "
             f"data_pipeline/convert_episode_bag_to_lerobot.py "
             f"{shlex.quote(str(episode_dir))} "
