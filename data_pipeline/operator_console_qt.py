@@ -267,10 +267,13 @@ class OperatorConsoleQtWindow(QMainWindow):
         artifacts_layout.setSpacing(8)
         self.latest_episode_label = QLabel("")
         self.latest_episode_label.setWordWrap(True)
+        self.latest_episode_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.latest_dataset_label = QLabel("")
         self.latest_dataset_label.setWordWrap(True)
+        self.latest_dataset_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.latest_viewer_label = QLabel("")
         self.latest_viewer_label.setWordWrap(True)
+        self.latest_viewer_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         artifacts_layout.addRow("Episode", self.latest_episode_label)
         artifacts_layout.addRow("Dataset", self.latest_dataset_label)
         artifacts_layout.addRow("Viewer", self.latest_viewer_label)
@@ -459,6 +462,7 @@ class OperatorConsoleQtWindow(QMainWindow):
 
     def _start_session(self) -> None:
         self.backend.start_session(self._config())
+        self._focus_process_logs("spark_devices")
 
     def _stop_session(self) -> None:
         self.backend.stop_session()
@@ -468,21 +472,29 @@ class OperatorConsoleQtWindow(QMainWindow):
 
     def _start_recording(self) -> None:
         self.backend.start_recording(self._config())
+        self._focus_process_logs("recorder")
 
     def _stop_recording(self) -> None:
         self.backend.stop_recording()
+        self._focus_process_logs("recorder")
 
     def _convert_latest(self) -> None:
         self.backend.start_conversion(self._config())
+        self._focus_process_logs("converter")
 
     def _open_viewer(self) -> None:
         self.backend.open_viewer(self._config())
+        self._focus_process_logs("viewer_server")
 
     def _start_named_process(self, name: str) -> None:
         self.backend.start_named_process(name, self._config())
+        if name in self.backend.processes:
+            self._focus_process_logs(name)
 
     def _stop_named_process(self, name: str) -> None:
         self.backend.stop_named_process(name)
+        if name in self.backend.processes:
+            self._focus_process_logs(name)
 
     def _tick(self) -> None:
         config = self._config()
@@ -519,6 +531,11 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.log_text.setPlainText(rendered)
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+
+    def _focus_process_logs(self, process_name: str) -> None:
+        index = self.log_process_combo.findText(process_name)
+        if index >= 0:
+            self.log_process_combo.setCurrentIndex(index)
 
     def _render_output(self, snapshot: dict[str, object]) -> None:
         lines = [

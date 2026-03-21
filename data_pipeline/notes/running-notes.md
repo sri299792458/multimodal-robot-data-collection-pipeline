@@ -1275,3 +1275,20 @@
     - conversion summary reports:
       - `bag_storage_id: mcap`
       - `status: pass`
+
+### Qt log focus and artifact copyability
+
+- Tightened two small but real Qt usability gaps in `data_pipeline/operator_console_qt.py`:
+  - action handlers now automatically switch the `Process Logs` selector to the relevant process:
+    - `Start Session` -> `spark_devices`
+    - `Record` / `Stop` -> `recorder`
+    - `Convert` -> `converter`
+    - `Open Viewer` -> `viewer_server`
+    - per-card `Start` / `Stop` buttons also focus that process
+  - the `Latest Artifacts` values are now mouse-selectable text, so operators can copy:
+    - episode id
+    - dataset id
+    - viewer URL
+- This keeps the interaction model simple:
+  - the right-hand panes remain the same
+  - but the UI now jumps to the likely log stream instead of making the operator select it manually
