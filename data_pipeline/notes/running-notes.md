@@ -1292,3 +1292,14 @@
 - This keeps the interaction model simple:
   - the right-hand panes remain the same
   - but the UI now jumps to the likely log stream instead of making the operator select it manually
+
+### Qt terminal Ctrl-C handling
+
+- The first Qt frontend pass only shut down cleanly through the window close path.
+- Pressing `Ctrl+C` in the launching terminal did not reliably stop the app, which was a regression from the Tk prototype.
+- Fixed `data_pipeline/operator_console_qt.py` by:
+  - installing explicit `SIGINT` / `SIGTERM` handlers that call `app.quit()`
+  - adding a small no-op `QTimer` signal pump so Python signal delivery is serviced while the Qt event loop is running
+- Result:
+  - the Qt app can now be terminated from the terminal with `Ctrl+C`
+  - backend cleanup still goes through the normal window/application shutdown path

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import signal
+import socket
 import sys
 from pathlib import Path
 
 try:
-    from PySide6.QtCore import QTimer, Qt
+    from PySide6.QtCore import QSocketNotifier, QTimer, Qt
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import (
         QApplication,
@@ -659,9 +661,37 @@ class OperatorConsoleQtWindow(QMainWindow):
 
 def main() -> int:
     app = QApplication(sys.argv)
+    signal_read, signal_write = socket.socketpair()
+    signal_read.setblocking(False)
+    signal_write.setblocking(False)
+
+    previous_wakeup_fd = signal.set_wakeup_fd(signal_write.fileno())
+
+    def _qt_signal_handler(_signum, _frame) -> None:
+        return None
+
+    signal.signal(signal.SIGINT, _qt_signal_handler)
+    signal.signal(signal.SIGTERM, _qt_signal_handler)
+
+    notifier = QSocketNotifier(signal_read.fileno(), QSocketNotifier.Type.Read)
+
+    def _drain_signal_fd() -> None:
+        try:
+            signal_read.recv(128)
+        except BlockingIOError:
+            pass
+        app.quit()
+
+    notifier.activated.connect(_drain_signal_fd)
     window = OperatorConsoleQtWindow()
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        notifier.setEnabled(False)
+        signal.set_wakeup_fd(previous_wakeup_fd)
+        signal_read.close()
+        signal_write.close()
 
 
 if __name__ == "__main__":
