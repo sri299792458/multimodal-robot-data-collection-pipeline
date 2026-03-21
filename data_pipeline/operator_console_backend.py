@@ -316,6 +316,7 @@ class OperatorConsoleBackend:
                 "realsense_contract": self._realsense_health(config, live_topics),
                 "gelsight_contract": self._gelsight_health(config, live_topics),
                 "recorder": self._recorder_health(),
+                "converter": self._converter_health(),
             }
             self.last_health = health
         except Exception as exc:
@@ -538,10 +539,34 @@ class OperatorConsoleBackend:
         if self.latest_episode_id and self.latest_recording_ok is True:
             return {
                 "status": "yellow",
-                "summary": "Last recording ready for conversion",
+                "summary": "Last recording complete",
                 "details": [self.latest_episode_id],
             }
         return {"status": "off", "summary": "Recorder not running", "details": []}
+
+    def _converter_health(self) -> dict[str, Any]:
+        process = self.processes["converter"]
+        if process.state == "running":
+            return {"status": "green", "summary": "Converter running", "details": [self.latest_episode_id] if self.latest_episode_id else []}
+        if process.state == "failed":
+            return {
+                "status": "red",
+                "summary": f"Converter failed with exit code {process.exit_code}",
+                "details": process.get_logs()[-4:],
+            }
+        if self.latest_episode_id and self.latest_recording_ok is True:
+            return {
+                "status": "yellow",
+                "summary": "Latest recording ready to convert",
+                "details": [self.latest_episode_id],
+            }
+        if self.latest_dataset_id:
+            return {
+                "status": "yellow",
+                "summary": "Latest dataset ready for review",
+                "details": [self.latest_dataset_id],
+            }
+        return {"status": "off", "summary": "Converter idle", "details": []}
 
     def _build_health_card(
         self,

@@ -146,8 +146,6 @@ class OperatorConsoleApp:
         self.stop_session_button.grid(row=0, column=1, padx=3, pady=3)
         self.validate_button = tk.Button(buttons, text="Validate", command=self._validate, width=16)
         self.validate_button.grid(row=1, column=0, padx=3, pady=3)
-        self.viewer_button = tk.Button(buttons, text="Open Viewer", command=self._open_viewer, width=16)
-        self.viewer_button.grid(row=1, column=1, padx=3, pady=3)
 
         row += 1
         info = tk.LabelFrame(form, text="Latest Artifacts")
@@ -167,7 +165,7 @@ class OperatorConsoleApp:
         frame = tk.LabelFrame(parent, text="Subsystem Health")
         frame.pack(fill="both", expand=True)
         for row, name in enumerate(
-            ["spark_devices", "teleop_gui", "realsense_contract", "gelsight_contract", "recorder"]
+            ["spark_devices", "teleop_gui", "realsense_contract", "gelsight_contract", "recorder", "converter"]
         ):
             card = tk.LabelFrame(frame, text=name.replace("_", " ").title())
             card.grid(row=row, column=0, sticky="ew", padx=8, pady=6)
@@ -360,6 +358,7 @@ class OperatorConsoleApp:
         self.output_text.configure(state="disabled")
 
     def _update_button_states(self, snapshot: dict[str, object]) -> None:
+        config = self._config()
         session_state = str(snapshot.get("session_state", "idle"))
         validation_state = str(snapshot.get("validation_state", "not_run"))
         ready = session_state in {"ready_for_dry_run", "ready_to_record", "recorded", "converted", "review_ready"}
@@ -369,18 +368,16 @@ class OperatorConsoleApp:
         converter_state = processes.get("converter", {}).get("state")
         recording_ready = bool(snapshot.get("latest_episode_id")) and snapshot.get("latest_recording_ok") is True
         recording_check_running = bool(snapshot.get("recording_check_running"))
+        viewer_available = self.backend.viewer_target_available(config)
         session_running = any(
             str(processes.get(name, {}).get("state", "stopped")) in {"running", "starting", "stopping", "failed"}
-            for name in ("spark_devices", "teleop_gui", "realsense_contract", "gelsight_contract", "recorder")
+            for name in ("spark_devices", "teleop_gui", "realsense_contract", "gelsight_contract", "recorder", "converter")
         )
 
         self.start_session_button.configure(state="normal" if not session_running else "disabled")
         self.stop_session_button.configure(state="normal" if session_running else "disabled")
         self.validate_button.configure(
             state="normal" if (ready or session_state == "bringing_up") and validation_state != "running" else "disabled"
-        )
-        self.viewer_button.configure(
-            state="normal" if self.backend.viewer_target_available(self._config()) else "disabled"
         )
         for name, widgets in self.health_cards.items():
             _summary_widget, _details_widget, start_button, stop_button = widgets
@@ -395,10 +392,17 @@ class OperatorConsoleApp:
                     start_button=start_button,
                     stop_button=stop_button,
                     recorder_state=str(recorder_state),
-                    converter_state=str(converter_state),
                     can_record=bool(can_record),
-                    recording_ready=recording_ready,
                     recording_check_running=recording_check_running,
+                )
+                continue
+            if name == "converter":
+                self._update_converter_card_buttons(
+                    start_button=start_button,
+                    stop_button=stop_button,
+                    converter_state=str(converter_state),
+                    recording_ready=recording_ready,
+                    viewer_available=viewer_available,
                 )
                 continue
             start_button.configure(state="normal" if start_enabled else "disabled")
@@ -410,9 +414,7 @@ class OperatorConsoleApp:
         start_button: tk.Button,
         stop_button: tk.Button,
         recorder_state: str,
-        converter_state: str,
         can_record: bool,
-        recording_ready: bool,
         recording_check_running: bool,
     ) -> None:
         if recorder_state == "running":
@@ -425,21 +427,35 @@ class OperatorConsoleApp:
             stop_button.configure(text="Wait", command=self._stop_recording, state="disabled")
             return
 
-        if recording_ready:
-            start_button.configure(
-                text="Convert",
-                command=self._convert_latest,
-                state="disabled" if converter_state == "running" else "normal",
-            )
-            stop_button.configure(
-                text="Record New",
-                command=self._start_recording,
-                state="normal" if can_record and converter_state != "running" else "disabled",
-            )
-            return
-
         start_button.configure(text="Record", command=self._start_recording, state="normal" if can_record else "disabled")
         stop_button.configure(text="Stop", command=self._stop_recording, state="disabled")
+
+    def _update_converter_card_buttons(
+        self,
+        *,
+        start_button: tk.Button,
+        stop_button: tk.Button,
+        converter_state: str,
+        recording_ready: bool,
+        viewer_available: bool,
+    ) -> None:
+        if converter_state == "running":
+            start_button.configure(text="Convert", command=self._convert_latest, state="disabled")
+            stop_button.configure(text="Stop", command=lambda: self._stop_named_process("converter"), state="normal")
+            return
+
+        if recording_ready:
+            start_button.configure(text="Convert", command=self._convert_latest, state="normal")
+            stop_button.configure(text="Open Viewer", command=self._open_viewer, state="normal" if viewer_available else "disabled")
+            return
+
+        if viewer_available:
+            start_button.configure(text="Open Viewer", command=self._open_viewer, state="normal")
+            stop_button.configure(text="Stop", command=lambda: self._stop_named_process("converter"), state="disabled")
+            return
+
+        start_button.configure(text="Convert", command=self._convert_latest, state="disabled")
+        stop_button.configure(text="Stop", command=lambda: self._stop_named_process("converter"), state="disabled")
 
 
 def main() -> int:

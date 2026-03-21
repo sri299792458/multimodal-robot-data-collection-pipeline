@@ -1058,3 +1058,27 @@
 - This is a timing correction, not a new state-model change.
 - Validation:
   - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
+
+### Recorder and converter split into separate tiles
+
+- Simplified the Operator Console interaction model after the recorder-state churn became too complicated:
+  - the recorder card no longer changes into a conversion card
+  - conversion is now represented as its own separate health/action tile directly under the recorder
+- `data_pipeline/operator_console.py` changes:
+  - Session form now stays focused on session-level actions only
+  - health tiles now include a dedicated `converter` card
+  - recorder card is back to a simpler responsibility:
+    - `Record`
+    - `Stop`
+    - with the temporary `Analyzing` handoff after stop
+  - converter card now owns conversion/review actions:
+    - `Convert`
+    - `Stop` while converting
+    - `Open Viewer` once a published dataset exists
+- `data_pipeline/operator_console_backend.py` changes:
+  - added a dedicated converter health card summary
+  - recorder summary now says `Last recording complete` instead of implying conversion belongs there
+- Also tightened session-button state so the top bar does not treat an in-progress conversion as idle.
+- Validation:
+  - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
+  - `timeout 5s python3 data_pipeline/operator_console.py`
