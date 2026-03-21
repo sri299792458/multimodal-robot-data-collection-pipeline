@@ -851,3 +851,60 @@
   - the `rosbag2_py` import issue is gone
   - conversion now fails for the real data reason:
     - missing required teleop command topics `/spark/lightning/teleop/cmd_joint_state` and `/spark/lightning/teleop/cmd_gripper_state`
+
+### Profile-driven bounded action hold
+
+- Investigated the newer tactile episodes and separated two different failure modes:
+  - `episode-20260320-232548`
+    - still invalid because the teleop command topics were missing entirely
+  - `episode-20260320-234600`
+    - command topics were present and dense overall
+    - conversion failed only because of two isolated mid-episode command gaps, with the worst gap around `135 ms`
+- Verified an important semantic point before changing anything:
+  - the converter already discards pre-roll before the first action sample
+  - so this was not caused by starting the recorder before pressing the foot pedal
+- Implemented the pipeline fix in `data_pipeline/convert_episode_bag_to_lerobot.py`:
+  - removed the old hard-coded `STATE_AGE_NS`, `ACTION_AGE_NS`, and `IMAGE_SKEW_NS` assumptions
+  - converter now reads:
+    - `published.observation_state.max_age_ms`
+    - `published.action.max_age_ms`
+    - per-image `max_skew_ms`
+    directly from the profile
+  - kept the same `latest_before` semantics for state and action, which is already a bounded zero-order hold
+  - added minimal action-hold diagnostics:
+    - `max_action_age_ms`
+    - `num_frames_over_50ms`
+    - `num_frames_over_100ms`
+- Updated `data_pipeline/configs/multisensor_20hz_lightning.yaml`:
+  - `action.max_age_ms` is now `150`
+  - state and image tolerances remain strict
+- Validation result after the change:
+  - `episode-20260320-232443` still fails
+    - first failure now at `157.36 ms`, so the older clearly-bad episode is still rejected
+  - `episode-20260320-234600` now converts successfully
+    - `status=pass`
+    - `published_frames=386`
+
+### Tactile dataset id split
+
+- The successful bounded-hold conversion exposed a schema issue:
+  - tactile episodes were still being pointed at `spark_multisensor_lightning_v1`
+  - that dataset had already been created without `observation.images.gelsight_left`
+  - so LeRobot correctly rejected the append due to feature mismatch
+- Fixed the checked-in defaults:
+  - `data_pipeline/configs/operator_console_presets.yaml`
+    - `lightning_d405_d455_left_gelsight` now defaults to `spark_multisensor_lightning_tactile_v1`
+  - `data_pipeline/docs/current-lightning-gelsight-runbook.md`
+    - updated record/convert/viewer examples to the tactile dataset id
+  - `data_pipeline/docs/hardware-bringup.md`
+    - clarified that tactile and non-tactile episodes should not share one published `dataset_id`
+- Added a converter escape hatch for already-recorded episodes:
+  - `--published-dataset-id`
+  - this allows re-targeting conversion without manually editing the raw manifest
+- Updated the console conversion path so `Convert Latest` uses the current preset dataset id as the published dataset target.
+- Verified end to end:
+  - `episode-20260320-234600` converted successfully with:
+    - `--published-dataset-id spark_multisensor_lightning_tactile_v1`
+  - output:
+    - `published/spark_multisensor_lightning_tactile_v1`
+    - `episode_index=1`

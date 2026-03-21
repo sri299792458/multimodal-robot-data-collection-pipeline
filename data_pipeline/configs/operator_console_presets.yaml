@@ -23,7 +23,7 @@ presets:
   lightning_d405_d455_left_gelsight:
     label: "Lightning + D405 + D455 + Left GelSight"
     active_arms: "lightning"
-    dataset_id: "spark_multisensor_lightning_v1"
+    dataset_id: "spark_multisensor_lightning_tactile_v1"
     robot_id: "spark_lightning"
     task_name: "pick_place"
     language_instruction: "pick up the object and place it in the target area"

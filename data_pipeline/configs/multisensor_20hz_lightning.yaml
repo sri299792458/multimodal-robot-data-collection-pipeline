@@ -50,7 +50,7 @@ published:
   action:
     field: action
     align: latest_before
-    max_age_ms: 50
+    max_age_ms: 150
     names:
       - lightning_cmd_joint_1
       - lightning_cmd_joint_2

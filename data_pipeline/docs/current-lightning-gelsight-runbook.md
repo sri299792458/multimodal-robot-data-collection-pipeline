@@ -26,7 +26,7 @@ It is intentionally concrete, not general.
 
 Current published dataset identifiers for this embodiment:
 
-- `dataset_id=spark_multisensor_lightning_v1`
+- `dataset_id=spark_multisensor_lightning_tactile_v1`
 - `robot_id=spark_lightning`
 - `profile=multisensor_20hz_lightning`
 - `active_arms=lightning`
@@ -127,7 +127,7 @@ Terminal 6:
 ```bash
 spark
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id spark_multisensor_lightning_v1 \
+  --dataset-id spark_multisensor_lightning_tactile_v1 \
   --task-name pick_place \
   --language-instruction "pick up the object and place it in the target area" \
   --robot-id spark_lightning \
@@ -153,7 +153,7 @@ Terminal 6:
 ```bash
 spark
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id spark_multisensor_lightning_v1 \
+  --dataset-id spark_multisensor_lightning_tactile_v1 \
   --task-name pick_place \
   --language-instruction "pick up the object and place it in the target area" \
   --robot-id spark_lightning \
@@ -187,6 +187,7 @@ source /opt/ros/jazzy/setup.bash
 source /home/srinivas/Desktop/pipeline/.venv/bin/activate
 python /home/srinivas/Desktop/pipeline/data_pipeline/convert_episode_bag_to_lerobot.py \
   /home/srinivas/Desktop/pipeline/raw_episodes/<episode_id> \
+  --published-dataset-id spark_multisensor_lightning_tactile_v1 \
   --published-root /home/srinivas/Desktop/pipeline/published
 ```
 
@@ -202,7 +203,7 @@ cd /home/srinivas/Desktop/pipeline/lerobot-dataset-visualizer
 env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy \
 NEXT_PUBLIC_DATASET_URL=http://10.33.55.65:3000/datasets \
 DATASET_URL=http://localhost:3000/datasets \
-REPO_ID=local/spark_multisensor_lightning_v1 \
+REPO_ID=local/spark_multisensor_lightning_tactile_v1 \
 EPISODES=0 \
 ~/.bun/bin/bun run build
 ```
@@ -212,14 +213,14 @@ cd /home/srinivas/Desktop/pipeline/lerobot-dataset-visualizer
 env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy \
 NEXT_PUBLIC_DATASET_URL=http://10.33.55.65:3000/datasets \
 DATASET_URL=http://localhost:3000/datasets \
-REPO_ID=local/spark_multisensor_lightning_v1 \
+REPO_ID=local/spark_multisensor_lightning_tactile_v1 \
 EPISODES=0 \
 ~/.bun/bin/bun start
 ```
 
 Open:
 
-- `http://10.33.55.65:3000/local/spark_multisensor_lightning_v1/episode_0`
+- `http://10.33.55.65:3000/local/spark_multisensor_lightning_tactile_v1/episode_0`
 
 Important:
 

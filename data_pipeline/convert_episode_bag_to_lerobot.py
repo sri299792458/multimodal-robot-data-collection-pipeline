@@ -35,11 +35,6 @@ from data_pipeline.pipeline_utils import load_profile, normalize_active_arms, pr
 from lerobot.datasets.lerobot_dataset import LeRobotDataset  # noqa: E402
 
 
-STATE_AGE_NS = 50_000_000
-ACTION_AGE_NS = 50_000_000
-IMAGE_SKEW_NS = 25_000_000
-
-
 @dataclass
 class TopicSeries:
     topic: str
@@ -455,11 +450,14 @@ def align_episode(
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
     arm_order = profile["notes"]["arm_order"]
     fps = int(profile["dataset"]["fps"])
+    published = profile["published"]
+    state_age_ns = int(round(float(published["observation_state"].get("max_age_ms", 50)) * 1_000_000.0))
+    action_age_ns = int(round(float(published["action"].get("max_age_ms", 50)) * 1_000_000.0))
 
-    state_sources = profile["published"]["observation_state"]["sources"]
-    action_sources = profile["published"]["action"]["sources"]
-    expected_state_dim = len(profile["published"]["observation_state"]["names"])
-    expected_action_dim = len(profile["published"]["action"]["names"])
+    state_sources = published["observation_state"]["sources"]
+    action_sources = published["action"]["sources"]
+    expected_state_dim = len(published["observation_state"]["names"])
+    expected_action_dim = len(published["action"]["names"])
 
     required_topics: list[str] = []
     for arm in arm_order:
@@ -521,7 +519,7 @@ def align_episode(
                 failure_reason = f"missing latest-before state sample for {topic}"
                 break
             value, age_ns = result
-            if age_ns > STATE_AGE_NS:
+            if age_ns > state_age_ns:
                 failure_reason = f"state sample too old for {topic}: {age_ns / 1e6:.2f} ms"
                 break
             state_alignment[topic].append(age_ns / 1e6)
@@ -534,7 +532,7 @@ def align_episode(
                     failure_reason = f"missing latest-before action sample for {topic}"
                     break
                 value, age_ns = result
-                if age_ns > ACTION_AGE_NS:
+                if age_ns > action_age_ns:
                     failure_reason = f"action sample too old for {topic}: {age_ns / 1e6:.2f} ms"
                     break
                 action_alignment[topic].append(age_ns / 1e6)
@@ -548,7 +546,8 @@ def align_episode(
                     failure_reason = f"missing nearest image sample for {topic}"
                     break
                 value, skew_ns = result
-                if skew_ns > IMAGE_SKEW_NS:
+                image_skew_ns = int(round(float(image_spec.get("max_skew_ms", 25)) * 1_000_000.0))
+                if skew_ns > image_skew_ns:
                     failure_reason = f"image sample too far from grid for {topic}: {skew_ns / 1e6:.2f} ms"
                     break
                 image_alignment[image_spec["field"]].append(skew_ns / 1e6)
@@ -602,10 +601,28 @@ def align_episode(
         },
         "published_frame_count": len(frames),
         "invalid_frame_count": len(failures),
+        "alignment_policy": {
+            "state_max_age_ms": state_age_ns / 1_000_000.0,
+            "action_max_age_ms": action_age_ns / 1_000_000.0,
+            "image_max_skew_ms": {
+                spec["field"]: float(spec.get("max_skew_ms", 25))
+                for spec in selected_image_specs
+            },
+        },
         "alignment_error_ms": {
             "state_topics": {topic: summarize_errors(values) for topic, values in state_alignment.items()},
             "action_topics": {topic: summarize_errors(values) for topic, values in action_alignment.items()},
             "image_fields": {field: summarize_errors(values) for field, values in image_alignment.items()},
+        },
+        "action_hold_diagnostics": {
+            "topics": {
+                topic: {
+                    "max_action_age_ms": max(values) if values else 0.0,
+                    "num_frames_over_50ms": int(sum(1 for value in values if value > 50.0)),
+                    "num_frames_over_100ms": int(sum(1 for value in values if value > 100.0)),
+                }
+                for topic, values in action_alignment.items()
+            }
         },
         "failures": [failure.__dict__ for failure in failures[:25]],
     }
@@ -640,6 +657,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("episode_dir", type=Path)
     parser.add_argument("--profile", default="")
+    parser.add_argument("--published-dataset-id", default="")
     parser.add_argument("--published-root", type=Path, default=REPO_ROOT / "published")
     parser.add_argument("--vcodec", default="auto")
     parser.add_argument("--skip-validate-load", action="store_true")
@@ -697,7 +715,7 @@ def main(argv: list[str] | None = None) -> int:
     image_shapes = image_shapes_from_frames(frames, image_fields)
     features = build_features(effective_profile, image_shapes)
 
-    dataset_id = manifest["dataset_id"]
+    dataset_id = args.published_dataset_id or manifest["dataset_id"]
     dataset_root = args.published_root / dataset_id
     artifact_dir = dataset_root / "meta" / "spark_conversion" / manifest["episode_id"]
     if artifact_dir.exists():
@@ -731,6 +749,7 @@ def main(argv: list[str] | None = None) -> int:
 
     diagnostics = {
         "episode_id": manifest["episode_id"],
+        "manifest_dataset_id": manifest["dataset_id"],
         "dataset_id": dataset_id,
         "dataset_root": str(dataset_root),
         "dataset_episode_index": dataset_episode_index,
@@ -741,6 +760,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     summary = {
         "episode_id": manifest["episode_id"],
+        "manifest_dataset_id": manifest["dataset_id"],
         "dataset_id": dataset_id,
         "dataset_root": str(dataset_root),
         "dataset_episode_index": dataset_episode_index,

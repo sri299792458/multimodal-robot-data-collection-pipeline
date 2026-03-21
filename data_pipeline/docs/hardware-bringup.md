@@ -20,6 +20,9 @@ Recommended metadata naming:
 - Lightning-only:
   - `dataset_id = spark_multisensor_lightning_v1`
   - `robot_id = spark_lightning`
+- Lightning-only with published tactile:
+  - `dataset_id = spark_multisensor_lightning_tactile_v1`
+  - `robot_id = spark_lightning`
 - Thunder-only:
   - `dataset_id = spark_multisensor_thunder_v1`
   - `robot_id = spark_thunder`
@@ -32,6 +35,7 @@ Why:
 - raw bags may be recorded with one active arm or both
 - published LeRobot datasets should stay profile-homogeneous
 - single-arm and bimanual episodes should not be appended into the same published dataset
+- episodes with different published image fields, such as tactile vs no tactile, should not be appended into the same `dataset_id`
 
 Current implementation note:
 
@@ -208,7 +212,7 @@ Expected topics when both are present:
 - `/spark/tactile/left/color/image_raw`
 - `/spark/tactile/right/color/image_raw`
 
-If only one side is present, you should see only the enabled topic. If tactile is not ready yet, skip this step. The current published profile treats GelSight RGB as optional.
+If only one side is present, you should see only the enabled topic. If tactile is not ready yet, skip this step. The profile allows optional tactile fields, but tactile and non-tactile episodes should still use separate published `dataset_id`s so the LeRobot feature schema stays homogeneous.
 
 
 ## 7. Preflight Check The Topic Surface
