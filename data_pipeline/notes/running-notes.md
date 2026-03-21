@@ -1082,3 +1082,25 @@
 - Validation:
   - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
   - `timeout 5s python3 data_pipeline/operator_console.py`
+
+### SPARK health flicker suppression
+
+- Found a real SPARK health-model issue in the Operator Console:
+  - the `spark_devices` card could briefly report `running but not ready`
+  - then flip back to `healthy` too quickly
+  - which hid an intermittent or stalled Spark stream while the Teleop GUI still failed to move on `Run Spark`
+- Tightened only the SPARK path in `data_pipeline/operator_console_backend.py`:
+  - SPARK sample probes now cover both:
+    - `/Spark_angle/{arm}`
+    - `/Spark_enable/{arm}`
+  - SPARK sample-topic probe cache TTL reduced to `0.5s`
+    - instead of reusing stale positive probe results for too long
+  - added a short SPARK-only recovery hold:
+    - after a bad sample, the card stays yellow as `SPARK Devices recovering` for `3s`
+    - instead of immediately flipping green on the next single good sample
+- Scope intentionally kept narrow:
+  - no global health-system rewrite
+  - only the SPARK card got the shorter cache and recovery hold behavior
+- Validation:
+  - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console.py`
+  - `timeout 5s python3 data_pipeline/operator_console.py`
