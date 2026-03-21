@@ -1452,3 +1452,23 @@
   - wrist depth parquet: about `30.9 MB`
   - scene depth parquet: about `22.1 MB`
   - total dataset root with RGB + state/action + depth sidecars: about `51 MB`
+
+### Depth viewer support
+
+- Extended the local `lerobot-dataset-visualizer` episode path to detect the optional `meta/depth_info.json` sidecar contract and build per-episode depth parquet URLs.
+- Added a `DepthStreamViewer` component that:
+  - reads aligned depth sidecar parquet files
+  - keeps the lossless `png16_bytes` sidecar format unchanged on disk
+  - loads only the current depth frame preview on demand instead of decoding every depth image up front
+  - decodes depth PNG bytes browser-side and renders a colorized preview, following the same general idea as `realsense-viewer` rather than trying to display raw 16-bit depth directly
+  - renders wrist and scene depth alongside the normal episode videos
+  - follows the shared playback clock instead of introducing a separate timeline
+- Important implementation detail:
+  - `hyparquet` needed `utf8: false` for `BYTE_ARRAY` reads, otherwise the binary PNG payload was coerced into strings and corrupted before decode
+- Validation:
+  - `bun run type-check` in `lerobot-dataset-visualizer`
+  - `bunx --bun next build` in `lerobot-dataset-visualizer`
+  - Playwright screenshot/DOM check against the real dataset route:
+    - `local/spark_multisensor_lightning_tactile_depth_eval/episode_0`
+    - confirmed both depth images render at `640x480` in the browser
+- Kept the existing RGB video player unchanged; depth is rendered as an extra synchronized section in the Episodes tab rather than being forced through the MP4 path.
