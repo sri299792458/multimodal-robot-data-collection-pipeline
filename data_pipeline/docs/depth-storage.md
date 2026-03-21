@@ -1,0 +1,219 @@
+# Published Depth Storage Contract
+
+## Goal
+
+Add RealSense depth to the published dataset in a way that is:
+
+- lossless
+- aligned to the same published frame grid as RGB/state/action
+- practical to upload and read later
+- independent of a private LeRobot core fork
+
+
+## Decision
+
+- Published depth must not be encoded through the current LeRobot RGB video path.
+- Published depth must be stored as a separate lossless sidecar under the published dataset root.
+- The first supported published depth fields are:
+  - `observation.depth.wrist`
+  - `observation.depth.scene`
+- Depth values must be preserved as native `uint16` millimeter images.
+- The canonical on-disk payload for each published depth frame is:
+  - PNG-encoded 16-bit grayscale bytes
+- These depth frames must be stored in chunked parquet files rather than as one file per frame.
+
+
+## Why
+
+- The current LeRobot dataset path is designed around:
+  - parquet for low-dimensional data
+  - image/video features for visual streams
+- The current local LeRobot checkout is not depth-ready as a published feature path:
+  - `video_utils.py` reports `video.is_depth_map = False`
+  - `image_writer.py` still assumes 3-channel images for writing
+- RealSense depth is already native `uint16` in millimeters and should not be quantized down to 8-bit by default.
+- RGB-D manipulation stacks commonly treat depth as a geometry signal that should stay lossless at storage time, even if training-time preprocessing later converts it to:
+  - float depth
+  - normalized depth
+  - point clouds
+  - voxels
+
+
+## Boundary
+
+- This contract applies only to the published dataset under:
+  - `published/<dataset_id>/`
+- It does not change:
+  - raw rosbag capture
+  - raw topic names
+  - the existing RGB LeRobot export path
+  - tactile publication policy
+- This step does not require or imply a LeRobot core fork.
+
+
+## First Scope
+
+### Included
+
+- RealSense wrist depth
+- RealSense scene depth
+- alignment to the published frame grid
+- lossless storage
+- metadata sufficient to decode and interpret the depth sidecar later
+
+### Excluded
+
+- GelSight derived depth
+- point cloud publication
+- normal maps
+- tactile marker offsets
+- viewer integration for depth in this step
+- training-loader integration in this step
+
+
+## Dataset Shape
+
+The published RGB/state/action dataset remains the primary LeRobot dataset.
+
+Depth is added as a sidecar tree next to it:
+
+```text
+published/<dataset_id>/
+  data/
+  meta/
+  videos/
+  depth/
+    observation.depth.wrist/
+      chunk-000/
+        file-000000.parquet
+        file-000001.parquet
+    observation.depth.scene/
+      chunk-000/
+        file-000000.parquet
+        file-000001.parquet
+  meta/depth_info.json
+```
+
+
+## Row Contract
+
+Each row in a depth parquet file must contain:
+
+- `episode_index`
+- `frame_index`
+- `timestamp`
+- `png16_bytes`
+- `height`
+- `width`
+- `unit`
+- `source_topic`
+
+Field requirements:
+
+- `episode_index`
+  - integer
+  - matches the published LeRobot episode index
+- `frame_index`
+  - integer
+  - matches the published frame index within that episode
+- `timestamp`
+  - float seconds on the same published grid used for RGB/state/action
+- `png16_bytes`
+  - binary blob containing a single 16-bit grayscale PNG frame
+- `height`
+  - integer
+- `width`
+  - integer
+- `unit`
+  - must be `"millimeters"`
+- `source_topic`
+  - exact raw depth topic used for the aligned sample
+
+
+## Metadata Contract
+
+`meta/depth_info.json` must include at least:
+
+- `dataset_id`
+- `depth_fields`
+- `encoding`
+- `unit`
+- `alignment_policy`
+- `source_topics`
+- `chunking`
+- `episode_indices_present`
+
+Expected values:
+
+- `encoding`
+  - `png16_gray`
+- `unit`
+  - `millimeters`
+- `alignment_policy`
+  - nearest-to-grid from the same published frame grid already used by the converter
+
+
+## Alignment Policy
+
+Depth must align to the same published frame grid as RGB/state/action.
+
+For each published depth field:
+
+- source topic:
+  - wrist: `/spark/cameras/wrist/depth/image_rect_raw`
+  - scene: `/spark/cameras/scene/depth/image_rect_raw`
+- selection rule:
+  - nearest frame to the published timestamp
+- tolerance:
+  - use the same skew policy family as image alignment
+  - define a field-level `max_skew_ms` for depth explicitly in the profile
+
+If depth fails alignment:
+
+- do not silently fabricate a depth frame
+- follow the same episode failure policy style used for the current converter:
+  - tail failure may truncate
+  - mid-episode failure should fail the episode unless explicitly redesigned later
+
+
+## Why Chunked Parquet Instead of Loose PNG Files
+
+- uploading many tiny files is operationally bad
+- parquet keeps the artifact count manageable
+- binary payloads in parquet are easy to shard and stream later
+- this avoids forcing depth into the current video feature path just to get fewer files
+
+
+## Why `uint16` Lossless Storage
+
+- RealSense depth is natively `uint16`
+- preserving it avoids premature quantization
+- later loaders can always convert to:
+  - float32 meters
+  - clipped normalized depth
+  - point clouds
+  - voxel grids
+- the reverse is not true if we first collapse depth to 8-bit
+
+
+## Non-Goals
+
+- Do not encode depth as H.264/H.265 MP4 in this step.
+- Do not normalize depth into RGB-like images in this step.
+- Do not add a private `depth_image` feature type inside LeRobot in this step.
+- Do not publish tactile-derived depth in this step.
+- Do not add a custom viewer for depth in this step.
+
+
+## Follow-On Work
+
+1. Add depth field declarations to the published profile config.
+2. Extend `convert_episode_bag_to_lerobot.py` to emit the depth sidecar.
+3. Add per-episode conversion artifacts for depth:
+   - row counts
+   - depth alignment diagnostics
+   - per-field shape and source-topic metadata
+4. Decide later whether to add:
+   - depth-aware loaders
+   - viewer support
+   - an upstream LeRobot contribution once the sidecar contract is stable

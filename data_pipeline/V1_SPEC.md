@@ -150,6 +150,12 @@ Raw bag storage defaults are defined in [docs/raw-storage.md](./docs/raw-storage
 - use `zstd_fast`
 - keep the raw layer lossless
 
+Published depth storage is defined separately in [docs/depth-storage.md](./docs/depth-storage.md):
+
+- keep published RGB in the normal LeRobot path
+- publish RealSense depth as a lossless sidecar
+- do not force depth into the current RGB video feature path
+
 
 ## 8. Raw Layer Rule
 

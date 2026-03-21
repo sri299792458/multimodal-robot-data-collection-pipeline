@@ -1406,3 +1406,21 @@
   - MCAP + `zstd_fast` remains the raw storage default
   - automatic head/tail trimming is now part of the raw storage policy
   - mid-episode pauses are explicitly not split by this step
+
+### Published depth storage spec
+
+- Did a deeper pass on adding depth to the published dataset rather than only to raw bags.
+- Confirmed the current local LeRobot path is not the right place to force depth through today:
+  - `video_utils.py` currently marks `video.is_depth_map = False`
+  - `image_writer.py` still assumes 3-channel image writing
+- Wrote `data_pipeline/docs/depth-storage.md` as a narrow storage contract instead of jumping straight to implementation.
+- The chosen direction is:
+  - keep the current LeRobot RGB/state/action dataset unchanged
+  - add RealSense depth as a lossless published sidecar
+  - store depth payloads as 16-bit grayscale PNG bytes inside chunked parquet shards
+  - avoid a private LeRobot core fork in this step
+- Explicitly left out of first scope:
+  - GelSight derived depth
+  - viewer support
+  - training-loader integration
+  - custom LeRobot feature types

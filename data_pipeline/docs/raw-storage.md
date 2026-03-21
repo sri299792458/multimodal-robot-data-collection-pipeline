@@ -53,4 +53,4 @@ Keep raw episode capture lossless while reducing bag size and removing the old `
   - depth rate
   - depth resolution
   - optional modality presets
-- Treat published depth as a separate design decision, likely with a lossless sidecar format rather than RGB video export.
+- Published depth is specified separately in [depth-storage.md](./depth-storage.md).
