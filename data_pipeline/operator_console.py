@@ -373,6 +373,7 @@ class OperatorConsoleApp:
         processes = snapshot.get("processes", {})
         recorder_state = processes.get("recorder", {}).get("state")
         converter_state = processes.get("converter", {}).get("state")
+        recording_ready = bool(snapshot.get("latest_episode_id")) and snapshot.get("latest_recording_ok") is True
         session_running = any(
             str(processes.get(name, {}).get("state", "stopped")) in {"running", "starting", "stopping", "failed"}
             for name in ("spark_devices", "teleop_gui", "realsense_contract", "gelsight_contract", "recorder")
@@ -386,11 +387,7 @@ class OperatorConsoleApp:
         self.record_button.configure(state="normal" if can_record else "disabled")
         self.stop_record_button.configure(state="normal" if recorder_state == "running" else "disabled")
         self.convert_button.configure(
-            state=(
-                "normal"
-                if snapshot.get("latest_episode_id") and snapshot.get("latest_recording_ok") is not False and converter_state != "running"
-                else "disabled"
-            )
+            state="normal" if recording_ready and converter_state != "running" else "disabled"
         )
         self.viewer_button.configure(
             state="normal" if snapshot.get("latest_dataset_id") else "disabled"
@@ -404,10 +401,48 @@ class OperatorConsoleApp:
                 start_enabled = False
                 stop_enabled = False
             if name == "recorder":
-                start_enabled = bool(can_record)
-                stop_enabled = recorder_state == "running"
+                self._update_recorder_card_buttons(
+                    start_button=start_button,
+                    stop_button=stop_button,
+                    recorder_state=str(recorder_state),
+                    converter_state=str(converter_state),
+                    can_record=bool(can_record),
+                    recording_ready=recording_ready,
+                )
+                continue
             start_button.configure(state="normal" if start_enabled else "disabled")
             stop_button.configure(state="normal" if stop_enabled else "disabled")
+
+    def _update_recorder_card_buttons(
+        self,
+        *,
+        start_button: tk.Button,
+        stop_button: tk.Button,
+        recorder_state: str,
+        converter_state: str,
+        can_record: bool,
+        recording_ready: bool,
+    ) -> None:
+        if recorder_state == "running":
+            start_button.configure(text="Record", command=self._start_recording, state="disabled")
+            stop_button.configure(text="Stop", command=self._stop_recording, state="normal")
+            return
+
+        if recording_ready:
+            start_button.configure(
+                text="Convert",
+                command=self._convert_latest,
+                state="disabled" if converter_state == "running" else "normal",
+            )
+            stop_button.configure(
+                text="Record New",
+                command=self._start_recording,
+                state="normal" if can_record and converter_state != "running" else "disabled",
+            )
+            return
+
+        start_button.configure(text="Record", command=self._start_recording, state="normal" if can_record else "disabled")
+        stop_button.configure(text="Stop", command=self._stop_recording, state="disabled")
 
 
 def main() -> int:

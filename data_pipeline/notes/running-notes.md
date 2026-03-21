@@ -908,3 +908,24 @@
   - output:
     - `published/spark_multisensor_lightning_tactile_v1`
     - `episode_index=1`
+
+### Recorder card action clarity
+
+- Tightened one operator-console usability issue in `data_pipeline/operator_console.py`:
+  - the recorder health card could say `Last recording ready for conversion`
+  - but still showed generic `Start` / `Stop` buttons
+  - which made it easy for an operator to press `Start` expecting conversion and accidentally begin a new recording
+- Fixed the recorder card so its controls now follow recorder state instead of staying generic:
+  - while recording:
+    - `Record` disabled
+    - `Stop` enabled
+  - when the latest recording is ready for conversion:
+    - `Convert` enabled
+    - `Record New` offered as the secondary action
+  - otherwise:
+    - `Record`
+    - `Stop` disabled
+- Tightened the global `Convert Latest` button to enable only when the latest recording has explicitly passed the post-stop integrity check, instead of allowing the intermediate `unknown` state.
+- Validation:
+  - `python3 -m py_compile data_pipeline/operator_console.py data_pipeline/operator_console_backend.py`
+  - `timeout 5s python3 data_pipeline/operator_console.py`
