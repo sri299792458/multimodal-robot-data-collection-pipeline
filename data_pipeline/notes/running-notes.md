@@ -809,3 +809,28 @@
 - Important nuance from the logs:
   - the Teleop process still emitted an early Tk callback traceback around gripper activation
   - but by the end of the probe window the required Lightning robot and teleop topics were flowing, so the console correctly treated Teleop as healthy for readiness purposes
+
+### Operator Console recording integrity check
+
+- Ran a short end-to-end console smoke recording with a dedicated smoke dataset id to exercise:
+  - `Start Session`
+  - `Validate`
+  - `Start Recording`
+  - `Stop Recording`
+- Result:
+  - the recorder lifecycle worked and wrote a real raw episode directory plus bag metadata
+  - but the recorded bag had `0` messages for:
+    - `/spark/lightning/teleop/cmd_joint_state`
+    - `/spark/lightning/teleop/cmd_gripper_state`
+  - which is exactly the failure mode you would get if an operator forgets to actually start teleop execution after recording begins
+- Added a post-stop recording integrity check in the console backend:
+  - parses `raw_episodes/<episode_id>/bag/metadata.yaml`
+  - verifies every required recorded topic for the chosen config has a nonzero message count
+  - surfaces failure through:
+    - `latest_recording_check_output`
+    - `last_action_error`
+    - recorder health card turns red with a concise missing-topic summary
+  - `Convert Latest` is now disabled when the last recording failed this integrity check
+- Validated the new behavior directly against the known-bad smoke episode:
+  - recorder health becomes `Last recording incomplete`
+  - the two zero-message teleop command topics are surfaced explicitly

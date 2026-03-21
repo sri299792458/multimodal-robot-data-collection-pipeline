@@ -79,6 +79,9 @@ class OperatorConsoleBackend:
         self.latest_dataset_id: str | None = None
         self.latest_viewer_url: str | None = None
         self.latest_conversion_output = ""
+        self.latest_recording_ok: bool | None = None
+        self.latest_recording_check_output = ""
+        self.latest_recording_config: dict[str, Any] | None = None
         self.pending_conversion_dataset_id: str | None = None
         self.topic_probe_cache: dict[str, tuple[float, bool]] = {}
         self.session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -157,6 +160,8 @@ class OperatorConsoleBackend:
             "latest_dataset_id": self.latest_dataset_id,
             "latest_viewer_url": self.latest_viewer_url,
             "latest_conversion_output": self.latest_conversion_output,
+            "latest_recording_ok": self.latest_recording_ok,
+            "latest_recording_check_output": self.latest_recording_check_output,
         }
 
     def validation_state(self, config: dict[str, Any]) -> str:
@@ -239,6 +244,9 @@ class OperatorConsoleBackend:
 
         episode_id = make_episode_id()
         self.latest_episode_id = episode_id
+        self.latest_recording_ok = None
+        self.latest_recording_check_output = ""
+        self.latest_recording_config = json.loads(json.dumps(config))
         command = self._build_record_command(config, episode_id=episode_id, dry_run=False)
         self._start_process("recorder", command)
         self._record_event("start_recording", {"episode_id": episode_id, "config": config})
@@ -413,6 +421,18 @@ class OperatorConsoleBackend:
                 "status": "red",
                 "summary": f"Recorder failed with exit code {process.exit_code}",
                 "details": [],
+            }
+        if self.latest_episode_id and self.latest_recording_ok is False:
+            return {
+                "status": "red",
+                "summary": "Last recording incomplete",
+                "details": self.latest_recording_check_output.splitlines()[:6],
+            }
+        if self.latest_episode_id and self.latest_recording_ok is True:
+            return {
+                "status": "yellow",
+                "summary": "Last recording ready for conversion",
+                "details": [self.latest_episode_id],
             }
         return {"status": "off", "summary": "Recorder not running", "details": []}
 
@@ -685,6 +705,8 @@ class OperatorConsoleBackend:
                     },
                 )
             self.pending_conversion_dataset_id = None
+        elif name == "recorder":
+            self._finalize_recording_after_exit(exit_code)
 
     def _run_ros_command(
         self,
@@ -780,6 +802,83 @@ class OperatorConsoleBackend:
             f"--published-root {shlex.quote(str(published_root))}"
         )
 
+    def _required_record_topics(self, config: dict[str, Any]) -> list[str]:
+        topics: list[str] = []
+        for arm in self._active_arm_list(config):
+            topics.extend(
+                [
+                    f"/spark/{arm}/robot/joint_state",
+                    f"/spark/{arm}/robot/eef_pose",
+                    f"/spark/{arm}/robot/tcp_wrench",
+                    f"/spark/{arm}/robot/gripper_state",
+                    f"/spark/{arm}/teleop/cmd_joint_state",
+                    f"/spark/{arm}/teleop/cmd_gripper_state",
+                ]
+            )
+        if config.get("realsense_enabled", True):
+            topics.extend(
+                [
+                    "/spark/cameras/wrist/color/image_raw",
+                    "/spark/cameras/wrist/depth/image_rect_raw",
+                    "/spark/cameras/scene/color/image_raw",
+                    "/spark/cameras/scene/depth/image_rect_raw",
+                ]
+            )
+        if config.get("gelsight_enabled", False):
+            if config.get("gelsight_enable_left", False):
+                topics.append("/spark/tactile/left/color/image_raw")
+            if config.get("gelsight_enable_right", False):
+                topics.append("/spark/tactile/right/color/image_raw")
+        return topics
+
+    def _finalize_recording_after_exit(self, exit_code: int) -> None:
+        success_codes = {0, -signal.SIGINT, -signal.SIGTERM, 130, 143}
+        if exit_code not in success_codes or not self.latest_episode_id or self.latest_recording_config is None:
+            return
+        ok, output = self._analyze_recording(self.latest_episode_id, self.latest_recording_config)
+        self.latest_recording_ok = ok
+        self.latest_recording_check_output = output
+        if not ok:
+            self.last_action_error = "Recording integrity check failed."
+        self._record_event(
+            "recording_check",
+            {
+                "episode_id": self.latest_episode_id,
+                "ok": ok,
+                "output": output,
+            },
+        )
+
+    def _analyze_recording(self, episode_id: str, config: dict[str, Any]) -> tuple[bool, str]:
+        metadata_path = REPO_ROOT / "raw_episodes" / episode_id / "bag" / "metadata.yaml"
+        if not metadata_path.exists():
+            return False, f"Recording metadata not found: {metadata_path}"
+
+        metadata = load_yaml(metadata_path)
+        bag_info = metadata.get("rosbag2_bagfile_information", {})
+        counts: dict[str, int] = {}
+        for entry in bag_info.get("topics_with_message_count", []):
+            topic_metadata = entry.get("topic_metadata", {})
+            topic_name = topic_metadata.get("name")
+            if topic_name:
+                counts[str(topic_name)] = int(entry.get("message_count", 0))
+
+        required_topics = self._required_record_topics(config)
+        zero_topics = [topic for topic in required_topics if counts.get(topic, 0) <= 0]
+        duration_ns = int(bag_info.get("duration", {}).get("nanoseconds", 0))
+        duration_s = duration_ns / 1_000_000_000 if duration_ns else 0.0
+        lines = [
+            f"episode_id={episode_id}",
+            f"duration_s={duration_s:.3f}",
+            f"message_count={int(bag_info.get('message_count', 0))}",
+        ]
+        if zero_topics:
+            lines.append("Zero-message required topics:")
+            lines.extend(zero_topics)
+            return False, "\n".join(lines)
+        lines.append("Required topics all have messages.")
+        return True, "\n".join(lines)
+
     def _config_signature(self, config: dict[str, Any]) -> str:
         keys = [
             "dataset_id",
@@ -817,6 +916,7 @@ class OperatorConsoleBackend:
             "latest_episode_id": self.latest_episode_id,
             "latest_dataset_id": self.latest_dataset_id,
             "latest_viewer_url": self.latest_viewer_url,
+            "latest_recording_ok": self.latest_recording_ok,
         }
         with self.session_log_path.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)

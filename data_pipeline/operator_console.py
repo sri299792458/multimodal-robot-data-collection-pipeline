@@ -348,6 +348,10 @@ class OperatorConsoleApp:
             lines.append("Validate output:")
             lines.append(str(snapshot["last_validation_output"]))
             lines.append("")
+        if snapshot.get("latest_recording_check_output"):
+            lines.append("Recording check:")
+            lines.append(str(snapshot["latest_recording_check_output"]))
+            lines.append("")
         if snapshot.get("latest_conversion_output"):
             lines.append("Convert output:")
             lines.append(str(snapshot["latest_conversion_output"]))
@@ -382,7 +386,11 @@ class OperatorConsoleApp:
         self.record_button.configure(state="normal" if can_record else "disabled")
         self.stop_record_button.configure(state="normal" if recorder_state == "running" else "disabled")
         self.convert_button.configure(
-            state="normal" if snapshot.get("latest_episode_id") and converter_state != "running" else "disabled"
+            state=(
+                "normal"
+                if snapshot.get("latest_episode_id") and snapshot.get("latest_recording_ok") is not False and converter_state != "running"
+                else "disabled"
+            )
         )
         self.viewer_button.configure(
             state="normal" if snapshot.get("latest_dataset_id") else "disabled"
