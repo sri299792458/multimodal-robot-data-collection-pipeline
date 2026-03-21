@@ -714,3 +714,30 @@
   - per-process log view
 - The first prototype is intentionally operational rather than polished.
 - Added `.operator_console/` to `.gitignore` because the backend now persists local session state there.
+
+### Operator Console runtime validation pass
+
+- Validated the new console backend against the real Lightning runtime by driving the backend directly, not just opening the Tk window.
+- The first backend run exposed a real design issue:
+  - continuous health polling was using `ros2 topic echo --once`
+  - that made healthy services look dead or too slow during startup
+- Split the health model into two layers:
+  - lightweight continuous health cards
+  - stronger stream probes only during `Validate`
+- Added startup grace handling for:
+  - SPARK
+  - Teleop
+  - RealSense
+  - GelSight
+- Updated session-state behavior:
+  - if a required subsystem is truly red, the session now transitions to `degraded`
+  - otherwise startup remains `bringing_up`
+- Added process-log hints into degraded health cards so the operator can see the latest actionable failure without opening a shell immediately.
+- Real runtime result with the current `lightning_d405_d455_left_gelsight` preset:
+  - SPARK: healthy
+  - Teleop: healthy
+  - RealSense: healthy
+  - GelSight: red / degraded
+  - `Validate` failed for the real reason:
+    - timed out waiting for `/spark/tactile/left/color/image_raw`
+  - the health card also surfaced the underlying launch failure for the GelSight bridge process

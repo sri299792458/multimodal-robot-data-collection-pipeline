@@ -85,6 +85,13 @@ class OperatorConsoleBackend:
         self.session_log_path = self.session_log_dir / f"session-{self.session_id}.json"
         self._persist_session_log()
 
+    STARTUP_GRACE_S = {
+        "spark_devices": 10.0,
+        "teleop_gui": 12.0,
+        "realsense_contract": 18.0,
+        "gelsight_contract": 12.0,
+    }
+
     def _load_presets(self) -> dict[str, dict[str, Any]]:
         data = load_yaml(self.presets_path)
         presets = data.get("presets", {})
@@ -117,6 +124,8 @@ class OperatorConsoleBackend:
             return "ready_to_record"
         if self._required_services_healthy(config):
             return "ready_for_dry_run"
+        if self._required_service_red(config):
+            return "degraded"
         if any(proc.state == "running" for proc in self.processes.values()):
             if any(proc.state == "failed" for proc in self.processes.values()):
                 return "degraded"
@@ -257,35 +266,43 @@ class OperatorConsoleBackend:
             self.health_refresh_in_flight = False
 
     def _required_services_healthy(self, config: dict[str, Any]) -> bool:
-        required = ["spark_devices", "teleop_gui"]
-        if config.get("realsense_enabled", True):
-            required.append("realsense_contract")
-        if config.get("gelsight_enabled", False):
-            required.append("gelsight_contract")
+        required = self._required_service_names(config)
         for name in required:
             status = self.last_health.get(name, {}).get("status")
             if status != "green":
                 return False
         return True
 
+    def _required_service_red(self, config: dict[str, Any]) -> bool:
+        required = self._required_service_names(config)
+        for name in required:
+            status = self.last_health.get(name, {}).get("status")
+            if status == "red":
+                return True
+        return False
+
+    def _required_service_names(self, config: dict[str, Any]) -> list[str]:
+        required = ["spark_devices", "teleop_gui"]
+        if config.get("realsense_enabled", True):
+            required.append("realsense_contract")
+        if config.get("gelsight_enabled", False):
+            required.append("gelsight_contract")
+        return required
+
     def _spark_health(self, config: dict[str, Any], live_topics: dict[str, str]) -> dict[str, Any]:
         arms = self._active_arm_list(config)
         required_topics = []
-        sample_topics = []
         for arm in arms:
             required_topics.extend([f"/Spark_angle/{arm}", f"/Spark_enable/{arm}"])
-            sample_topics.append(f"/Spark_angle/{arm}")
         return self._build_health_card(
             process_name="spark_devices",
             live_topics=live_topics,
             required_topics=required_topics,
-            sample_topics=sample_topics,
         )
 
     def _teleop_health(self, config: dict[str, Any], live_topics: dict[str, str]) -> dict[str, Any]:
         arms = self._active_arm_list(config)
         required_topics = []
-        sample_topics = []
         for arm in arms:
             required_topics.extend(
                 [
@@ -297,13 +314,14 @@ class OperatorConsoleBackend:
                     f"/spark/{arm}/teleop/cmd_gripper_state",
                 ]
             )
-            sample_topics.append(f"/spark/{arm}/robot/joint_state")
-        return self._build_health_card(
+        card = self._build_health_card(
             process_name="teleop_gui",
             live_topics=live_topics,
             required_topics=required_topics,
-            sample_topics=sample_topics,
         )
+        if card["status"] == "yellow":
+            card["summary"] = "Teleop running; connect robot in Teleop GUI"
+        return card
 
     def _realsense_health(self, config: dict[str, Any], live_topics: dict[str, str]) -> dict[str, Any]:
         if not config.get("realsense_enabled", True):
@@ -312,30 +330,24 @@ class OperatorConsoleBackend:
             "/spark/cameras/wrist/color/image_raw",
             "/spark/cameras/scene/color/image_raw",
         ]
-        sample_topics = list(required_topics)
         return self._build_health_card(
             process_name="realsense_contract",
             live_topics=live_topics,
             required_topics=required_topics,
-            sample_topics=sample_topics,
         )
 
     def _gelsight_health(self, config: dict[str, Any], live_topics: dict[str, str]) -> dict[str, Any]:
         if not config.get("gelsight_enabled", False):
             return {"status": "off", "summary": "GelSight disabled", "details": []}
         required_topics = []
-        sample_topics = []
         if config.get("gelsight_enable_left", False):
             required_topics.append("/spark/tactile/left/color/image_raw")
-            sample_topics.append("/spark/tactile/left/color/image_raw")
         if config.get("gelsight_enable_right", False):
             required_topics.append("/spark/tactile/right/color/image_raw")
-            sample_topics.append("/spark/tactile/right/color/image_raw")
         return self._build_health_card(
             process_name="gelsight_contract",
             live_topics=live_topics,
             required_topics=required_topics,
-            sample_topics=sample_topics,
         )
 
     def _recorder_health(self) -> dict[str, Any]:
@@ -356,18 +368,17 @@ class OperatorConsoleBackend:
         process_name: str,
         live_topics: dict[str, str],
         required_topics: list[str],
-        sample_topics: list[str],
     ) -> dict[str, Any]:
         process = self.processes[process_name]
         missing_topics = [topic for topic in required_topics if topic not in live_topics]
-        dead_sample_topics = [
-            topic for topic in sample_topics if topic in live_topics and not self._topic_has_message(topic)
-        ]
         details = []
         if missing_topics:
             details.append("Missing topics: " + ", ".join(missing_topics))
-        if dead_sample_topics:
-            details.append("No messages on: " + ", ".join(dead_sample_topics))
+        startup_grace = self.STARTUP_GRACE_S.get(process_name, 0.0)
+        within_grace = process.started_at is not None and (time.time() - process.started_at) < startup_grace
+        log_hint = self._latest_log_hint(process)
+        if log_hint:
+            details.append("Last log: " + log_hint)
 
         if process.state == "failed":
             return {
@@ -375,7 +386,13 @@ class OperatorConsoleBackend:
                 "summary": f"{process.display_name} failed",
                 "details": details or [f"Exit code {process.exit_code}"],
             }
-        if missing_topics or dead_sample_topics:
+        if missing_topics:
+            if process.state == "running" and within_grace:
+                return {
+                    "status": "yellow",
+                    "summary": f"{process.display_name} starting",
+                    "details": details,
+                }
             if process.state == "running":
                 return {
                     "status": "yellow",
@@ -386,7 +403,7 @@ class OperatorConsoleBackend:
                 "status": "red",
                 "summary": f"{process.display_name} not ready",
                 "details": details,
-            }
+                }
         if process.state == "running":
             return {
                 "status": "green",
@@ -398,6 +415,14 @@ class OperatorConsoleBackend:
             "summary": f"{process.display_name} topics healthy but process unmanaged",
             "details": [],
         }
+
+    def _latest_log_hint(self, process: ManagedProcess) -> str | None:
+        for line in reversed(process.get_logs()):
+            text = line.strip()
+            if not text or text.startswith("$ "):
+                continue
+            return text
+        return None
 
     def _active_arm_list(self, config: dict[str, Any]) -> list[str]:
         return [
@@ -429,6 +454,22 @@ class OperatorConsoleBackend:
         return result.returncode == 0
 
     def _run_validation(self, config: dict[str, Any]) -> None:
+        self.last_validation_ok = False
+        self.last_validation_signature = ""
+        probe_errors = self._probe_required_streams(config)
+        if probe_errors:
+            self.last_validation_output = "\n".join(probe_errors)
+            self.last_action_error = "Validate failed."
+            self._record_event(
+                "validate",
+                {
+                    "ok": False,
+                    "returncode": None,
+                    "output": self.last_validation_output,
+                },
+            )
+            return
+
         command = self._build_record_command(config, episode_id="", dry_run=True)
         try:
             result = subprocess.run(
@@ -457,6 +498,34 @@ class OperatorConsoleBackend:
             self.last_validation_signature = ""
             self.last_validation_output = str(exc)
             self.last_action_error = f"Validate failed: {exc}"
+
+    def _probe_required_streams(self, config: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        active_arms = self._active_arm_list(config)
+        if active_arms:
+            spark_topic = f"/Spark_angle/{active_arms[0]}"
+            if not self._topic_has_message(spark_topic, timeout_s=2.5):
+                errors.append(f"Timed out waiting for Spark stream: {spark_topic}")
+            robot_topic = f"/spark/{active_arms[0]}/robot/joint_state"
+            if not self._topic_has_message(robot_topic, timeout_s=2.5):
+                errors.append(f"Timed out waiting for robot state: {robot_topic}")
+        if config.get("realsense_enabled", True):
+            for topic in [
+                "/spark/cameras/wrist/color/image_raw",
+                "/spark/cameras/scene/color/image_raw",
+            ]:
+                if not self._topic_has_message(topic, timeout_s=2.5):
+                    errors.append(f"Timed out waiting for camera stream: {topic}")
+        if config.get("gelsight_enabled", False):
+            if config.get("gelsight_enable_left", False):
+                topic = "/spark/tactile/left/color/image_raw"
+                if not self._topic_has_message(topic, timeout_s=2.5):
+                    errors.append(f"Timed out waiting for tactile stream: {topic}")
+            if config.get("gelsight_enable_right", False):
+                topic = "/spark/tactile/right/color/image_raw"
+                if not self._topic_has_message(topic, timeout_s=2.5):
+                    errors.append(f"Timed out waiting for tactile stream: {topic}")
+        return errors
 
     def _start_process(self, name: str, command: str) -> None:
         with self.process_lock:
