@@ -90,8 +90,6 @@ class OperatorConsoleBackend:
         self.latest_recording_config: dict[str, Any] | None = None
         self.pending_conversion_dataset_id: str | None = None
         self.topic_probe_cache: dict[str, tuple[float, bool]] = {}
-        self.health_recovery_hold_until: dict[str, float] = {}
-        self.health_hold_details: dict[str, list[str]] = {}
         self.session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.session_events: list[dict[str, Any]] = []
         self.session_log_dir = STATE_DIR / "sessions"
@@ -454,14 +452,35 @@ class OperatorConsoleBackend:
         for arm in arms:
             required_topics.extend([f"/Spark_angle/{arm}", f"/Spark_enable/{arm}"])
             sample_topics.append(f"/Spark_angle/{arm}")
-        return self._build_health_card(
+        card = self._build_health_card(
             process_name="spark_devices",
             live_topics=live_topics,
             required_topics=required_topics,
             sample_topics=sample_topics,
-            sample_cache_ttl_s=0.5,
-            recovery_hold_s=3.0,
         )
+        if card["status"] != "green":
+            return card
+
+        static_topics = [
+            topic
+            for topic in sample_topics
+            if topic in live_topics
+            and not self._float_array_topic_changes_cached(
+                topic,
+                topic_type=live_topics.get(topic, "std_msgs/msg/Float32MultiArray"),
+                timeout_s=1.0,
+                min_messages=8,
+                min_max_delta=1e-6,
+                ttl_s=0.5,
+            )
+        ]
+        if static_topics:
+            return {
+                "status": "yellow",
+                "summary": "SPARK Devices live but static",
+                "details": ["No angle change observed on: " + ", ".join(static_topics)],
+            }
+        return card
 
     def _teleop_health(self, config: dict[str, Any], live_topics: dict[str, str]) -> dict[str, Any]:
         arms = self._active_arm_list(config)
@@ -579,8 +598,6 @@ class OperatorConsoleBackend:
         live_topics: dict[str, str],
         required_topics: list[str],
         sample_topics: list[str],
-        sample_cache_ttl_s: float = 5.0,
-        recovery_hold_s: float = 0.0,
     ) -> dict[str, Any]:
         process = self.processes[process_name]
         missing_topics = [topic for topic in required_topics if topic not in live_topics]
@@ -588,11 +605,7 @@ class OperatorConsoleBackend:
             topic
             for topic in sample_topics
             if topic in live_topics
-            and not self._topic_has_message_cached(
-                topic,
-                topic_type=live_topics.get(topic, ""),
-                ttl_s=sample_cache_ttl_s,
-            )
+            and not self._topic_has_message_cached(topic, topic_type=live_topics.get(topic, ""))
         ]
         details = []
         if missing_topics:
@@ -612,9 +625,6 @@ class OperatorConsoleBackend:
                 "details": details or [f"Exit code {process.exit_code}"],
             }
         if missing_topics or dead_sample_topics:
-            if recovery_hold_s > 0.0:
-                self.health_recovery_hold_until[process_name] = time.time() + recovery_hold_s
-                self.health_hold_details[process_name] = list(details)
             if process.state == "running" and within_grace:
                 return {
                     "status": "yellow",
@@ -632,16 +642,6 @@ class OperatorConsoleBackend:
                 "summary": f"{process.display_name} not ready",
                 "details": details,
                 }
-        hold_until = self.health_recovery_hold_until.get(process_name, 0.0)
-        if hold_until > time.time():
-            hold_details = self.health_hold_details.get(process_name, [])
-            return {
-                "status": "yellow",
-                "summary": f"{process.display_name} recovering",
-                "details": hold_details,
-            }
-        self.health_recovery_hold_until.pop(process_name, None)
-        self.health_hold_details.pop(process_name, None)
         if process.state == "running":
             return {
                 "status": "green",
@@ -716,6 +716,65 @@ class OperatorConsoleBackend:
             if (now - ts) < ttl_s:
                 return value
         value = self._topic_has_message(topic, topic_type=topic_type, timeout_s=timeout_s)
+        self.topic_probe_cache[cache_key] = (now, value)
+        return value
+
+    def _float_array_topic_changes(
+        self,
+        topic: str,
+        topic_type: str = "std_msgs/msg/Float32MultiArray",
+        timeout_s: float = 1.0,
+        min_messages: int = 8,
+        min_max_delta: float = 1e-6,
+    ) -> bool:
+        probe_command = [
+            shlex.quote(SYSTEM_PYTHON),
+            shlex.quote(str(TOPIC_PROBE_SCRIPT)),
+            "--topic",
+            shlex.quote(topic),
+            "--topic-type",
+            shlex.quote(topic_type),
+            "--timeout",
+            shlex.quote(str(timeout_s)),
+            "--min-messages",
+            shlex.quote(str(min_messages)),
+            "--require-float-array-change",
+            "--min-max-delta",
+            shlex.quote(str(min_max_delta)),
+        ]
+        try:
+            result = self._run_ros_command(
+                " ".join(probe_command),
+                timeout=max(2.0, timeout_s + 1.0),
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return False
+        return result.returncode == 0
+
+    def _float_array_topic_changes_cached(
+        self,
+        topic: str,
+        topic_type: str = "std_msgs/msg/Float32MultiArray",
+        timeout_s: float = 1.0,
+        min_messages: int = 8,
+        min_max_delta: float = 1e-6,
+        ttl_s: float = 0.5,
+    ) -> bool:
+        cache_key = f"dynamic|{topic}|{topic_type}|{min_messages}|{min_max_delta}"
+        cached = self.topic_probe_cache.get(cache_key)
+        now = time.time()
+        if cached is not None:
+            ts, value = cached
+            if (now - ts) < ttl_s:
+                return value
+        value = self._float_array_topic_changes(
+            topic,
+            topic_type=topic_type,
+            timeout_s=timeout_s,
+            min_messages=min_messages,
+            min_max_delta=min_max_delta,
+        )
         self.topic_probe_cache[cache_key] = (now, value)
         return value
 
