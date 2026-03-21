@@ -163,22 +163,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         root_layout.setSpacing(10)
         self.setCentralWidget(central)
 
-        state_row = QFrame()
-        state_row.setObjectName("stateRow")
-        state_layout = QHBoxLayout(state_row)
-        state_layout.setContentsMargins(0, 0, 0, 0)
-        state_layout.setSpacing(8)
-        state_layout.addStretch(1)
-        self.session_state_label = QLabel("Session: idle")
-        self.validation_state_label = QLabel("Validation: not_run")
-        self.session_state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.validation_state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        apply_chip_style(self.session_state_label, "off")
-        apply_chip_style(self.validation_state_label, "off")
-        state_layout.addWidget(self.session_state_label)
-        state_layout.addWidget(self.validation_state_label)
-        root_layout.addWidget(state_row)
-
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         root_layout.addWidget(splitter, 1)
@@ -391,9 +375,6 @@ class OperatorConsoleQtWindow(QMainWindow):
             QMainWindow {
                 background: #eef2f6;
             }
-            QFrame#stateRow {
-                background: transparent;
-            }
             QGroupBox {
                 font-weight: 700;
                 border: 1px solid #d8dde6;
@@ -562,12 +543,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         config = self._config()
         self.backend.request_health_refresh(config)
         snapshot = self.backend.snapshot(config)
-        session_state = str(snapshot.get("session_state", "idle"))
-        validation_state = str(snapshot.get("validation_state", "not_run"))
-        self.session_state_label.setText(f"Session: {session_state}")
-        self.validation_state_label.setText(f"Validation: {validation_state}")
-        apply_chip_style(self.session_state_label, self._session_chip_tone(session_state))
-        apply_chip_style(self.validation_state_label, self._validation_chip_tone(validation_state))
         self.latest_episode_label.setText(snapshot.get("latest_episode_id") or "")
         self.latest_dataset_label.setText(snapshot.get("latest_dataset_id") or "")
         self.latest_viewer_label.setText(snapshot.get("latest_viewer_url") or "")
@@ -625,24 +600,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.output_text.setPlainText(rendered)
         scrollbar = self.output_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
-
-    def _session_chip_tone(self, state: str) -> str:
-        if state in {"ready_to_record", "converted", "review_ready"}:
-            return "green"
-        if state in {"bringing_up", "ready_for_dry_run", "recording", "converting"}:
-            return "yellow"
-        if state == "degraded":
-            return "red"
-        return "off"
-
-    def _validation_chip_tone(self, state: str) -> str:
-        if state == "passed":
-            return "green"
-        if state in {"running", "stale"}:
-            return "yellow"
-        if state == "failed":
-            return "red"
-        return "off"
 
     def _update_button_states(self, snapshot: dict[str, object]) -> None:
         config = self._config()

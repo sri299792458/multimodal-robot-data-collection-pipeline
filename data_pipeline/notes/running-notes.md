@@ -1334,9 +1334,13 @@
 
 - The big `Operator Console` title band was not adding operational value and was taking vertical space away from the real workflow.
 - Removed it from `data_pipeline/operator_console_qt.py`.
-- Replaced it with a slim top row that only keeps the two useful state chips:
-  - `Session`
-  - `Validation`
+
+### Removed duplicate Qt state row
+
+- The slim replacement state row also turned out to be redundant because `Action Output` already shows:
+  - `Session state`
+  - `Validation state`
+- Removed that top row too, so the UI now starts immediately with the three working columns.
 - Validation:
   - `python3 -m py_compile data_pipeline/operator_console_qt.py`
   - `QT_QPA_PLATFORM=offscreen timeout 5s python data_pipeline/operator_console_qt.py`
