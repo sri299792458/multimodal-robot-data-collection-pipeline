@@ -1616,3 +1616,35 @@
     - result: `spark mode parity smoke ok`
 - Important note:
   - like the previous slice, this is still not a substitute for live hardware parity validation
+
+### Teleop runtime refactor slice 4: extract Tk callback controller
+
+- Added [teleop_runtime_controller.py](/home/srinivas/Desktop/pipeline/TeleopSoftware/teleop_runtime_controller.py) so the Tk button callbacks now delegate into a small controller module instead of owning the runtime behavior directly inside `launch_helpers/tk_functions.py`.
+- Moved these callback behaviors into the new controller layer:
+  - dashboard connect
+  - arm connect
+  - reset e-stop
+  - free-drive toggle
+  - gripper toggle
+  - home
+  - emergency stop
+  - SpaceMouse invert toggle
+  - FT zero
+  - FT home helper
+- Replaced [tk_functions.py](/home/srinivas/Desktop/pipeline/TeleopSoftware/launch_helpers/tk_functions.py) with a thin compatibility wrapper that:
+  - exports the same callback names
+  - exports the same `freedrive`, `gripper`, and `buttons` globals expected by `launch.py`
+  - forwards all behavior into the new controller module
+- Validation:
+  - `python3 -m py_compile TeleopSoftware/teleop_runtime_controller.py TeleopSoftware/launch_helpers/tk_functions.py`
+  - ROS-path import smoke test under `source /opt/ros/jazzy/setup.bash` confirmed the wrapper still exports:
+    - `freedrive`
+    - `gripper`
+    - `buttons`
+    - `db_connect`
+    - `connect_fun`
+    - `home_fun`
+    - `zero_ft`
+- Important note:
+  - this slice is still internal only
+  - the Tk GUI call signatures and expected globals were preserved intentionally
