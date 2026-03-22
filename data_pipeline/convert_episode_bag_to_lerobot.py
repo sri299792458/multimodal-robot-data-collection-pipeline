@@ -26,6 +26,7 @@ from PIL import Image as PILImage
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 from sensor_msgs.msg import Image, JointState
+from std_msgs.msg import Bool
 
 try:
     from realsense2_camera_msgs.msg import Metadata
@@ -161,6 +162,12 @@ class DepthSelection:
     frame_index: int
     timestamp_ns: int
     skew_ms: float
+
+
+@dataclass
+class ActiveInterval:
+    start_ns: int
+    end_ns: int
 
 
 def stamp_to_ns(stamp) -> int:
@@ -321,6 +328,9 @@ def parse_message(topic: str, msg: Any, bag_timestamp_ns: int, parse_value: bool
         )
         return ts_ns, value
 
+    if isinstance(msg, Bool):
+        return ts_ns, bool(msg.data)
+
     raise TypeError(f"Unsupported message type for topic {topic}: {type(msg)}")
 
 
@@ -341,6 +351,10 @@ def build_value_topics(profile: dict[str, Any]) -> set[str]:
     return topics
 
 
+def teleop_activity_topic(profile: dict[str, Any]) -> str:
+    return str(profile.get("teleop_activity", {}).get("topic", "")).strip()
+
+
 def build_selected_image_specs(profile: dict[str, Any], topics_with_data: set[str]) -> list[dict[str, Any]]:
     selected_specs: list[dict[str, Any]] = []
     for image_spec in profile["published"]["images"]:
@@ -357,8 +371,11 @@ def build_selected_depth_specs(profile: dict[str, Any], topics_with_data: set[st
     return selected_specs
 
 
-def build_parse_topics(topics_to_read: set[str], topic_types: dict[str, str], value_topics: set[str]) -> set[str]:
+def build_parse_topics(profile: dict[str, Any], topics_to_read: set[str], topic_types: dict[str, str], value_topics: set[str]) -> set[str]:
     parse_topics = set(value_topics)
+    activity_topic = teleop_activity_topic(profile)
+    if activity_topic and activity_topic in topics_to_read:
+        parse_topics.add(activity_topic)
     parse_topics.update(
         topic
         for topic in topics_to_read
@@ -564,6 +581,72 @@ def summarize_errors(values_ms: list[float]) -> dict[str, float] | None:
     }
 
 
+def build_active_intervals(
+    activity_series: TopicSeries,
+    *,
+    active_value: bool,
+    clamp_start_ns: int,
+    clamp_end_ns: int,
+) -> list[ActiveInterval]:
+    if clamp_end_ns < clamp_start_ns or not activity_series.timestamps_ns:
+        return []
+
+    intervals: list[ActiveInterval] = []
+    timestamps = activity_series.timestamps_ns
+    values = activity_series.values
+    current_active = bool(values[0]) == active_value
+    current_start_ns = timestamps[0] if current_active else None
+
+    for ts_ns, value in zip(timestamps[1:], values[1:], strict=False):
+        next_active = bool(value) == active_value
+        if current_active and not next_active:
+            if current_start_ns is not None:
+                interval_start_ns = max(current_start_ns, clamp_start_ns)
+                interval_end_ns = min(ts_ns - 1, clamp_end_ns)
+                if interval_end_ns >= interval_start_ns:
+                    intervals.append(ActiveInterval(start_ns=interval_start_ns, end_ns=interval_end_ns))
+            current_start_ns = None
+        elif not current_active and next_active:
+            current_start_ns = ts_ns
+        current_active = next_active
+
+    if current_active and current_start_ns is not None:
+        interval_start_ns = max(current_start_ns, clamp_start_ns)
+        interval_end_ns = clamp_end_ns
+        if interval_end_ns >= interval_start_ns:
+            intervals.append(ActiveInterval(start_ns=interval_start_ns, end_ns=interval_end_ns))
+
+    return intervals
+
+
+def filter_grid_to_intervals(grid: list[int], intervals: list[ActiveInterval]) -> list[int]:
+    if not intervals:
+        return []
+    filtered: list[int] = []
+    interval_index = 0
+    for t_ns in grid:
+        while interval_index < len(intervals) and t_ns > intervals[interval_index].end_ns:
+            interval_index += 1
+        if interval_index >= len(intervals):
+            break
+        interval = intervals[interval_index]
+        if interval.start_ns <= t_ns <= interval.end_ns:
+            filtered.append(t_ns)
+    return filtered
+
+
+def activity_interval_diagnostics(intervals: list[ActiveInterval]) -> dict[str, Any]:
+    active_duration_ns = sum(interval.end_ns - interval.start_ns for interval in intervals)
+    return {
+        "activity_interval_count": len(intervals),
+        "activity_intervals_ns": [
+            {"start_ns": interval.start_ns, "end_ns": interval.end_ns}
+            for interval in intervals
+        ],
+        "active_duration_s": float(active_duration_ns / 1_000_000_000.0),
+    }
+
+
 def align_episode(
     series: dict[str, TopicSeries],
     profile: dict[str, Any],
@@ -577,6 +660,10 @@ def align_episode(
     published = profile["published"]
     state_age_ns = int(round(float(published["observation_state"].get("max_age_ms", 50)) * 1_000_000.0))
     action_age_ns = int(round(float(published["action"].get("max_age_ms", 50)) * 1_000_000.0))
+    activity_spec = profile.get("teleop_activity", {})
+    activity_topic = teleop_activity_topic(profile)
+    activity_required = bool(activity_spec.get("required_for_convert", False))
+    activity_active_value = bool(activity_spec.get("active_value", True))
 
     state_sources = published["observation_state"]["sources"]
     action_sources = published["action"]["sources"]
@@ -589,14 +676,34 @@ def align_episode(
         required_topics.extend(action_sources[arm].values())
     required_topics.extend(spec["topic"] for spec in selected_image_specs)
     required_topics.extend(spec["topic"] for spec in selected_depth_specs)
+    if activity_required and activity_topic:
+        required_topics.append(activity_topic)
 
     ensure_series_present(series, required_topics)
 
     t_start_ns = max(series[topic].first_ts() for topic in required_topics)
     t_end_ns = min(series[topic].last_ts() for topic in required_topics)
-    grid = ns_grid(t_start_ns, t_end_ns, fps)
+    full_grid = ns_grid(t_start_ns, t_end_ns, fps)
+    activity_intervals: list[ActiveInterval] = []
+    activity_mode = "disabled"
+    if activity_topic and activity_topic in series and series[activity_topic].timestamps_ns:
+        activity_intervals = build_active_intervals(
+            series[activity_topic],
+            active_value=activity_active_value,
+            clamp_start_ns=t_start_ns,
+            clamp_end_ns=t_end_ns,
+        )
+        activity_mode = "filtered_by_enable"
+        grid = filter_grid_to_intervals(full_grid, activity_intervals)
+    else:
+        grid = full_grid
+        if activity_topic:
+            activity_mode = "fallback_missing_activity_topic"
     if not grid:
-        raise RuntimeError(f"No valid 20Hz frame grid can be formed for interval [{t_start_ns}, {t_end_ns}]")
+        raise RuntimeError(
+            f"No valid 20Hz frame grid can be formed for interval [{t_start_ns}, {t_end_ns}] "
+            f"after teleop-activity filtering."
+        )
 
     frames: list[dict[str, Any]] = []
     failures: list[AlignmentFailure] = []
@@ -752,6 +859,16 @@ def align_episode(
         "usable_interval_ns": {
             "t_start_ns": t_start_ns,
             "t_end_ns": t_end_ns,
+        },
+        "activity_filter": {
+            "mode": activity_mode,
+            "topic": activity_topic or None,
+            "active_value": activity_active_value,
+            "grid_frame_count_before_filter": len(full_grid),
+            "grid_frame_count_after_filter": len(grid),
+            "inactive_removed_frame_count": len(full_grid) - len(grid),
+            "inactive_removed_duration_s": float((len(full_grid) - len(grid)) / fps) if fps > 0 else 0.0,
+            **activity_interval_diagnostics(activity_intervals),
         },
         "published_frame_count": len(frames),
         "invalid_frame_count": len(failures),
@@ -1072,7 +1189,7 @@ def main(argv: list[str] | None = None) -> int:
     all_topics_to_read = set(manifest["topics"])
     topic_types = manifest.get("topic_types", {})
     value_topics = build_value_topics(profile) & all_topics_to_read
-    parse_topics = build_parse_topics(all_topics_to_read, topic_types, value_topics)
+    parse_topics = build_parse_topics(profile, all_topics_to_read, topic_types, value_topics)
     bag_storage_id = detect_bag_storage_id(bag_dir)
     series = read_topic_series(bag_dir, all_topics_to_read, parse_topics, storage_id=bag_storage_id)
     apply_realsense_metadata_timestamps(series)

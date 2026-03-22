@@ -1044,7 +1044,7 @@ class OperatorConsoleBackend:
         return f"source {shlex.quote(ROS_SETUP)} && " + " ".join(args)
 
     def _required_record_topics(self, config: dict[str, Any]) -> list[str]:
-        topics: list[str] = []
+        topics: list[str] = ["/Spark_enable/lightning"]
         for arm in self._active_arm_list(config):
             topics.extend(
                 [

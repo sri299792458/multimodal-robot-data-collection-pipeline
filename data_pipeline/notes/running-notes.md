@@ -1688,3 +1688,31 @@
   - `Recording failed.`
 - Validation:
   - `python3 -m py_compile data_pipeline/operator_console_backend.py data_pipeline/operator_console_qt.py`
+
+### Teleop-activity mask for published conversion
+
+- The earlier command-only trimming/alignment policy was not enough once the operator intentionally released the shared foot pedal mid-demo.
+- Added a profile-level `teleop_activity` contract to:
+  - [multisensor_20hz.yaml](/home/srinivas/Desktop/pipeline/data_pipeline/configs/multisensor_20hz.yaml)
+  - [multisensor_20hz_lightning.yaml](/home/srinivas/Desktop/pipeline/data_pipeline/configs/multisensor_20hz_lightning.yaml)
+  - [multisensor_20hz_thunder.yaml](/home/srinivas/Desktop/pipeline/data_pipeline/configs/multisensor_20hz_thunder.yaml)
+- Current hardware contract uses:
+  - `/Spark_enable/lightning`
+  - one shared foot pedal gates both arms
+- Raw recording now treats that topic as required for new captures via the profile resolver path in:
+  - [pipeline_utils.py](/home/srinivas/Desktop/pipeline/data_pipeline/pipeline_utils.py)
+- Published conversion now:
+  - parses the raw Boolean activity topic
+  - treats it as a zero-order-held activity signal until the next sample
+  - removes pedal-off spans from the published frame grid
+  - keeps the existing action-hold bound for active spans
+  - does not split one raw episode into multiple published episodes
+- Older raw episodes that predate this signal still fall back to the previous behavior and may still fail on long mid-episode command gaps.
+- Updated the written contracts in:
+  - [raw-storage.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/raw-storage.md)
+  - [topic-contract.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/topic-contract.md)
+  - [dataset-mapping.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/dataset-mapping.md)
+  - [V1_SPEC.md](/home/srinivas/Desktop/pipeline/data_pipeline/V1_SPEC.md)
+- Validation:
+  - `python3 -m py_compile data_pipeline/pipeline_utils.py data_pipeline/record_episode.py data_pipeline/convert_episode_bag_to_lerobot.py data_pipeline/operator_console_backend.py`
+  - synthetic alignment smoke test confirmed a mid-episode pedal-off gap is removed from the published grid instead of becoming an action-hold failure

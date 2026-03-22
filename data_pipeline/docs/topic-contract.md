@@ -51,6 +51,20 @@ For arm-scoped robot topics, `{arm}` means one of:
 | `/spark/{arm}/teleop/cmd_joint_state` | `sensor_msgs/msg/JointState` | command | `command_issue_time_v1` | 20-200 Hz | published source |
 | `/spark/{arm}/teleop/cmd_gripper_state` | `sensor_msgs/msg/JointState` | command | `command_issue_time_v1` | 20-200 Hz | published source |
 
+## Raw Activity Signal
+
+The current hardware uses one shared foot pedal, and the Teleop runtime gates both arms off the Lightning enable signal.
+
+For V1 raw capture, record:
+
+| Topic | Message Type | Semantic Type | Timestamp Meaning | Expected Rate | V1 Role |
+|---|---|---|---|---:|---|
+| `/Spark_enable/lightning` | `std_msgs/msg/Bool` | teleop activity | host time of the received SPARK packet carrying the enable state | 20-200 Hz | raw-only conversion aid |
+
+This topic is not the published action.
+
+Its role is only to mark whether the operator intended teleoperation to be active at a given moment, so published conversion can remove pedal-off pauses instead of misclassifying them as stale action.
+
 
 ## Why These Types
 
@@ -98,6 +112,7 @@ The existing runtime currently publishes or can be made to publish the following
 | `/lightning_force_offset` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | optional raw debug topic |
 | `/lightning_spark_command_angles` | `std_msgs/msg/Float32MultiArray` | exists in current hardware-tuned runtime, unstamped | `/spark/lightning/teleop/cmd_joint_state` |
 | `/lightning_spark_command_gripper` | `std_msgs/msg/Float32` | exists in current hardware-tuned runtime, unstamped | `/spark/lightning/teleop/cmd_gripper_state` |
+| `/Spark_enable/lightning` | `std_msgs/msg/Bool` | exists in current hardware-tuned runtime, unstamped | raw teleop-activity signal for conversion |
 | `/thunder_q` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | `/spark/thunder/robot/joint_state` |
 | `/thunder_cartesian_eef` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | `/spark/thunder/robot/eef_pose` |
 | `/thunder_ft` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | `/spark/thunder/robot/tcp_wrench` |

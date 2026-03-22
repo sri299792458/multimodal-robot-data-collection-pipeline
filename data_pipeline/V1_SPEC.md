@@ -156,6 +156,13 @@ Published depth storage is defined separately in [docs/depth-storage.md](./docs/
 - publish RealSense depth as a lossless sidecar
 - do not force depth into the current RGB video feature path
 
+Published conversion also relies on a raw teleop-activity signal defined in [docs/topic-contract.md](./docs/topic-contract.md):
+
+- record `/Spark_enable/lightning` for new raw episodes
+- use it only as a conversion-time activity mask
+- do not treat it as the published action
+- do not split one raw episode into multiple published episodes because of pedal-off pauses
+
 
 ## 8. Raw Layer Rule
 

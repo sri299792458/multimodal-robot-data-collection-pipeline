@@ -255,6 +255,21 @@ Validity threshold:
 
 Action is also causal. A nearest-future command would make the published sample look as though the system already knew a command that had not yet been issued.
 
+### Teleop activity mask
+
+Raw source:
+
+- `/Spark_enable/lightning`
+
+Alignment rule:
+
+- treat the Boolean value as a zero-order-held teleop-activity signal until the next sample
+- keep published frames only while the held value is `true`
+
+### Why
+
+The action topics encode what command was issued, not whether the operator intended teleoperation to be active continuously. When the foot pedal is intentionally released in the middle of a raw episode, those pedal-off spans should be removed from the published demonstration rather than counted as stale-action failures.
+
 
 ### Wrist and scene RGB
 
@@ -303,6 +318,11 @@ If a required modality is outside its validity threshold:
 - if the failure occurs only at the episode tail, truncate the episode at the last valid frame
 - otherwise fail conversion for that episode
 
+Exception:
+
+- frames masked out by the teleop-activity signal are not treated as failures
+- they are removed from the published timeline before action-age validity is applied
+
 ### Why
 
 Silent filling of large gaps hides real collection problems and makes the dataset look healthier than it is. Tail truncation is acceptable because it only shortens the usable interval. Mid-episode failures should be made explicit.
@@ -318,6 +338,7 @@ The following topics remain raw-only in V1:
 - `/spark/tactile/right/depth/image_raw`
 - `/spark/tactile/left/marker_offset`
 - `/spark/tactile/right/marker_offset`
+- `/Spark_enable/lightning`
 - optional point cloud or debugging topics
 
 ### Why

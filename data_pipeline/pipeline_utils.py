@@ -157,6 +157,10 @@ def collect_candidate_topics(profile: dict[str, Any]) -> list[str]:
         if topic:
             topics.add(topic)
 
+    teleop_activity_topic = str(profile.get("teleop_activity", {}).get("topic", "")).strip()
+    if teleop_activity_topic:
+        topics.add(teleop_activity_topic)
+
     topics.update(profile.get("raw_only_topics", []))
     return sorted(topics)
 
@@ -174,6 +178,11 @@ def required_topics_from_profile(profile: dict[str, Any]) -> list[str]:
     for image_spec in published.get("images", []):
         if image_spec.get("required", False):
             required.add(image_spec["topic"])
+
+    teleop_activity = profile.get("teleop_activity", {})
+    teleop_activity_topic = str(teleop_activity.get("topic", "")).strip()
+    if teleop_activity_topic and bool(teleop_activity.get("required_for_record", False)):
+        required.add(teleop_activity_topic)
 
     return sorted(required)
 

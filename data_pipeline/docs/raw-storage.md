@@ -14,6 +14,9 @@ Keep raw episode capture lossless while reducing bag size and removing the old `
   - basis: `/spark/<arm>/teleop/cmd_*`
   - policy: trim only head and tail idle time
   - default padding: `1.0 s` before and after
+- Raw capture must also include the current shared teleop-activity signal:
+  - basis: `/Spark_enable/lightning`
+  - role: distinguish intentional pedal-off pauses from stale-action failures during published conversion
 - Published LeRobot export remains unchanged:
   - parquet for low-dimensional data
   - MP4 for RGB image fields
@@ -27,6 +30,7 @@ Keep raw episode capture lossless while reducing bag size and removing the old `
   - published dataset schema
   - depth publication policy
 - It does not split episodes on mid-run gaps in command activity.
+- It does not trim mid-episode pedal-off gaps out of the raw bag.
 
 ## Requirements
 
@@ -38,6 +42,7 @@ Keep raw episode capture lossless while reducing bag size and removing the old `
 - Conversion must auto-detect bag storage from `bag/metadata.yaml` and must not assume `sqlite3`.
 - Recording integrity checks must continue to use `bag/metadata.yaml`, which is backend-agnostic.
 - If teleop command topics are missing entirely, automatic raw trimming must skip rather than guess.
+- New recordings must include the teleop-activity topic declared by the profile, even though published conversion may still fall back gracefully for older raw episodes that predate this signal.
 
 ## Non-Goals
 
