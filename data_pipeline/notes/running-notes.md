@@ -1740,3 +1740,42 @@
   - local probes must clear proxy variables, for example with:
     - `env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy curl ...`
 - With the rebuilt production bundle and proxy-clean local probes, the viewer serves local datasets correctly again.
+
+### End-to-end parity check after Teleop runtime refactor
+
+- Used real hardware episode [episode-20260321-224016](/home/srinivas/Desktop/pipeline/raw_episodes/episode-20260321-224016) as the post-refactor parity check.
+- Raw capture manifest confirms the expected newer pipeline behavior:
+  - `git_commit: 2e20f2f...`
+  - `bag_storage_id: mcap`
+  - `bag_storage_preset_profile: zstd_fast`
+  - `/Spark_enable/lightning` recorded
+  - post-record raw trim applied with policy `teleop_command_head_tail_v1`
+- Raw trim outcome for this episode:
+  - bag size reduced from `1,599,275,662` bytes to `839,951,373` bytes
+  - message count reduced from `32,153` to `17,272`
+  - trimmed interval retained the teleop-active span plus `1.0s` pad before/after
+- Published conversion for the same episode succeeded:
+  - [conversion_summary.json](/home/srinivas/Desktop/pipeline/published/spark_multisensor_lightning_v1/meta/spark_conversion/episode-20260321-224016/conversion_summary.json)
+  - `status: pass`
+  - `dataset_episode_index: 1`
+  - `published_frame_count: 332`
+- Alignment diagnostics for this successful run are healthy:
+  - action hold max age on both teleop command topics: `33.824998 ms`
+  - `num_frames_over_50ms: 0`
+  - `num_frames_over_100ms: 0`
+  - state max alignment error: `11.37 ms`
+  - RGB/depth max skew stayed below the `25 ms` policy
+- Teleop activity masking was recorded but did not need to remove any mid-episode spans here:
+  - one continuous active interval
+  - `inactive_removed_duration_s: 0.0`
+  - `grid_frame_count_before_filter == grid_frame_count_after_filter == 332`
+- Depth publication also worked on the same real episode:
+  - sidecars written under:
+    - [depth/observation.depth.wrist/chunk-000/file-001.parquet](/home/srinivas/Desktop/pipeline/published/spark_multisensor_lightning_v1/depth/observation.depth.wrist/chunk-000/file-001.parquet)
+    - [depth/observation.depth.scene/chunk-000/file-001.parquet](/home/srinivas/Desktop/pipeline/published/spark_multisensor_lightning_v1/depth/observation.depth.scene/chunk-000/file-001.parquet)
+  - preview videos written under:
+    - [depth_preview/observation.depth.wrist/chunk-000/file-001.mp4](/home/srinivas/Desktop/pipeline/published/spark_multisensor_lightning_v1/depth_preview/observation.depth.wrist/chunk-000/file-001.mp4)
+    - [depth_preview/observation.depth.scene/chunk-000/file-001.mp4](/home/srinivas/Desktop/pipeline/published/spark_multisensor_lightning_v1/depth_preview/observation.depth.scene/chunk-000/file-001.mp4)
+- Conclusion:
+  - the current Teleop refactor slices did not break the Lightning single-arm record/convert/view path on this checked episode
+  - the remaining work should stay focused on real issues found in use, not more speculative refactor
