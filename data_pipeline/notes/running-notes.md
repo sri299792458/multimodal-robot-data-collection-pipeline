@@ -1716,3 +1716,22 @@
 - Validation:
   - `python3 -m py_compile data_pipeline/pipeline_utils.py data_pipeline/record_episode.py data_pipeline/convert_episode_bag_to_lerobot.py data_pipeline/operator_console_backend.py`
   - synthetic alignment smoke test confirmed a mid-episode pedal-off gap is removed from the published grid instead of becoming an action-hold failure
+
+### Viewer toolchain diagnosis on this machine
+
+- Confirmed the repeated viewer-start failure was not a dataset conversion issue.
+- Root cause on this machine was an incomplete frontend build toolchain:
+  - `bun` was installed
+  - `node` / `npm` were not installed initially
+  - the visualizer could be left with a partial `.next/` tree that existed on disk but did not contain a valid production build marker
+  - specifically, [`.next/BUILD_ID`](/home/srinivas/Desktop/pipeline/lerobot-dataset-visualizer/.next/BUILD_ID) was missing while `bun start` still tried to launch `next start`
+- Installed the missing system Node toolchain:
+  - `nodejs`
+  - `npm`
+- Rebuilt the visualizer under the real Node/Next path:
+  - `npx next build`
+  - later reconfirmed `bun run build` also succeeds now that `node` exists
+- Verified the production build is now valid:
+  - [`.next/BUILD_ID`](/home/srinivas/Desktop/pipeline/lerobot-dataset-visualizer/.next/BUILD_ID) exists
+  - `next start` no longer fails with `Could not find a production build in the '.next' directory`
+- Remaining viewer `503 DNS lookup failed` behavior is a separate issue in the local dataset-serving path or viewer environment wiring, not the Node/Bun/Next toolchain itself.
