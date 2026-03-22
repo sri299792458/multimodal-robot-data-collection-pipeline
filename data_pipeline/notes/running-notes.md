@@ -131,7 +131,7 @@
 - Added the legacy `/{arm}_spark_command_angles` and `/{arm}_spark_command_gripper` publishers back into `TeleopSoftware/launch.py` so the legacy raw topic surface matches the tested hardware branch alongside the stable stamped topics.
 - Ported the tested Spark-to-UR offset tables, trigger calibration ranges, and Lightning visualization transform into `TeleopSoftware/launch_helpers/run.py`.
 - Updated `TeleopSoftware/UR/arms.py` so `enable_grippers` can be either a boolean or a per-arm map, matching the tested branch structure without breaking the existing call sites.
-- Intentionally left the `lightning_spark_enable` topic-selection bug unchanged for now because it exists in the tested branch as well; this sync pass is preserving calibrated behavior rather than changing control semantics.
+- Intentionally left the shared `lightning_spark_enable` gating unchanged because the current hardware uses one foot pedal to gate both arms through the Lightning enable topic; this sync pass preserved that tested control semantics.
 
 ### Teleop bring-up findings
 
@@ -1606,7 +1606,7 @@
   - Force
 - Preserved one especially important current quirk exactly as-is:
   - the Spark path still keys enable gating off `lightning_spark_enable` for both arms
-  - this looks suspicious, but it is current runtime behavior and was intentionally not “fixed” during the refactor
+  - this is intentional current hardware behavior because one shared foot pedal gates both arms through the Lightning enable topic
 - Validation:
   - `python3 -m py_compile TeleopSoftware/teleop_runtime_core.py TeleopSoftware/launch_helpers/run.py`
   - parity-oriented Spark smoke check under ROS + `.venv`:

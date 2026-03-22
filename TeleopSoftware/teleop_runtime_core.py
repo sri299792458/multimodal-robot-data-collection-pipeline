@@ -182,8 +182,8 @@ def process_spark_mode(
     fields[arm]["Spark_plot"].moveto(fields[arm]["point"], y - 10, x - 10)
     fields[arm]["Spark_meter"].moveto(fields[arm]["Spark_z_meter"], 0, z)
 
-    # Preserve the current runtime behavior exactly, including the shared
-    # lightning enable key used by both arms in the Spark path.
+    # Preserve the current runtime behavior exactly: one shared foot pedal
+    # currently gates both arms through the Lightning enable topic.
     enable_topic = "lightning_spark_enable"
     if control_modes[arm] == "Spark" or control_modes[arm] == "Optimization":
         if enable_topic in ros_data:
