@@ -1526,3 +1526,30 @@
   - FT zero on enable rising edge
   - current UR mode-transition stop behavior
   - current stamped `/spark/<arm>/teleop/cmd_*` topic surface
+
+### Teleop runtime refactor slice 1: Spark adapter extraction
+
+- Started implementation with the safest isolated slice: the Spark serial path only.
+- Added [spark_runtime.py](/home/srinivas/Desktop/pipeline/TeleopSoftware/Spark/spark_runtime.py) to hold the internal Spark runtime pieces that were previously embedded in `SparkNode.py`:
+  - `SparkRuntimeConfig`
+  - `SparkPacket`
+  - `SparkSample`
+  - `SparkAngleUnwrapper`
+  - `SparkSerialTransport`
+  - `SparkDeviceRunner`
+- Kept [SparkNode.py](/home/srinivas/Desktop/pipeline/TeleopSoftware/Spark/SparkNode.py) as the same script entrypoint and the same ROS topic publisher surface:
+  - `Spark_angle/<id>` or `Spark_angle_buffer/<id>`
+  - `Spark_enable/<id>`
+- Preserved the important current behavior in this first extraction:
+  - same baudrate and timeout defaults
+  - same ESP32 boot-settle delay
+  - same waiting loop for first valid JSON packet
+  - same offsets-pickle lookup by device ID
+  - same disconnect/reconnect retry loop
+  - same angle unwrapping math
+- Added one small robustness improvement while keeping behavior aligned:
+  - malformed JSON packets and malformed packet payloads are skipped inside the transport instead of leaking mixed parsing logic into the ROS node
+- Validation:
+  - `python3 -m py_compile TeleopSoftware/Spark/SparkNode.py TeleopSoftware/Spark/spark_runtime.py`
+  - parity check against the legacy unwrap math over randomized samples:
+    - `spark unwrap parity ok`
