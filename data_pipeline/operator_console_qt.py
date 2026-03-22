@@ -158,8 +158,8 @@ class OperatorConsoleQtWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget()
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(14, 14, 14, 14)
-        root_layout.setSpacing(10)
+        root_layout.setContentsMargins(18, 18, 18, 18)
+        root_layout.setSpacing(12)
         self.setCentralWidget(central)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -168,21 +168,21 @@ class OperatorConsoleQtWindow(QMainWindow):
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setContentsMargins(2, 2, 2, 2)
         left_layout.setSpacing(12)
         left_layout.addWidget(self._make_scroll_area(self._build_form_panel()), 1)
         splitter.addWidget(left_panel)
 
         center_panel = QWidget()
         center_layout = QVBoxLayout(center_panel)
-        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setContentsMargins(2, 2, 2, 2)
         center_layout.setSpacing(12)
         center_layout.addWidget(self._make_scroll_area(self._build_health_panel()), 1)
         splitter.addWidget(center_panel)
 
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(2, 2, 2, 2)
         right_layout.setSpacing(12)
         right_layout.addWidget(self._build_command_panel())
         right_layout.addWidget(self._build_logs_panel(), 3)
@@ -205,7 +205,7 @@ class OperatorConsoleQtWindow(QMainWindow):
     def _build_form_panel(self) -> QWidget:
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 4, 0, 6)
         layout.setSpacing(12)
 
         layout.addWidget(self._build_task_box())
@@ -326,6 +326,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         box = QGroupBox("Subsystem Health")
         layout = QVBoxLayout(box)
         layout.setSpacing(10)
+        layout.setContentsMargins(10, 14, 10, 14)
         display_names = {
             "spark_devices": "SPARK Devices",
             "teleop_gui": "Teleop GUI",
