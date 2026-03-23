@@ -1918,3 +1918,19 @@
   - `Record Right GelSight`
   - both left and right GelSight device paths
 - This is still not the final discovery/role-assignment UI. It is the first honest UI slice: the operator can now see what the current form resolves to before starting a session, and the form no longer hides the left/right GelSight or RealSense enable semantics.
+
+### Second session-plan UI slice
+
+- Replaced the fixed wrist/scene/GelSight path inputs in [operator_console_qt.py](/home/srinivas/Desktop/pipeline/data_pipeline/operator_console_qt.py) with a `Session Devices` table.
+- Presets now populate device rows instead of filling hardcoded sensor fields.
+- The Qt config now derives the legacy launch fields from the device table:
+  - first enabled wrist-role RealSense -> `wrist_serial_no`
+  - first enabled scene-role RealSense -> `scene_serial_no`
+  - enabled left/right GelSight roles -> `gelsight_enable_left/right` and device paths
+- Added support for `session_devices` in [session_capture_plan.py](/home/srinivas/Desktop/pipeline/data_pipeline/session_capture_plan.py), so the session plan can now be built from explicit device rows rather than only the old fixed form fields.
+- Fixed a real model bug in the session-plan layer:
+  - `selected_topics` no longer blindly starts from every topic in the published profile
+  - disabled sensors are now filtered out of the raw selected topic set based on enabled device roles
+  - this prevents plans without GelSight from incorrectly selecting tactile topics and then failing later when the recorder expects them to be live
+- This is still transitional because runtime discovery is not yet live hardware discovery.
+  - But the UI/backend contract is now aligned around an explicit device list rather than hidden one-off fields.

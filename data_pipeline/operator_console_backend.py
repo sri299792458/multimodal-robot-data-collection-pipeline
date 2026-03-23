@@ -1154,6 +1154,7 @@ class OperatorConsoleBackend:
             "gelsight_enable_right",
             "gelsight_left_device_path",
             "gelsight_right_device_path",
+            "session_devices",
         ]
         payload = {key: config.get(key) for key in keys}
         return json.dumps(payload, sort_keys=True)

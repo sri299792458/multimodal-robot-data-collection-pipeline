@@ -436,3 +436,34 @@ The same slice also brings the current form closer to the real backend config by
 This is still transitional because the operator is not yet editing a true discovered-device table.
 
 But it removes the previous opacity: the form is no longer just a bag of serial fields, and the operator can now see what session plan the backend will actually use before starting the session.
+
+## Second UI Slice
+
+The second UI slice makes the current session plan editable through an explicit device list.
+
+- the operator console now uses a `Session Devices` table instead of dedicated:
+  - wrist serial
+  - scene serial
+  - left GelSight path
+  - right GelSight path
+- presets populate device rows
+- the Qt config derives the current legacy launch fields from that device list
+
+This slice also fixed an important model issue in the session-plan backend:
+
+- `selected_topics` is no longer built by blindly taking every topic referenced by the default published profile
+- instead, the session plan filters sensor topics based on the enabled device roles in the session device list
+
+That means:
+
+- a session with no enabled GelSight devices no longer selects tactile topics
+- a session with one enabled left GelSight selects left tactile topics but not right tactile topics
+- a session with no enabled scene-role camera will show the profile as incompatible instead of silently carrying scene topics anyway
+
+This is still not full hardware discovery.
+
+But it is the first UI/backend form where:
+
+- the operator edits an explicit device list
+- the backend uses that same device list to build the session plan
+- the session plan chooses the raw sensor topics that will be recorded

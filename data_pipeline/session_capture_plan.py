@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from data_pipeline.pipeline_utils import (
-    collect_candidate_topics,
     list_known_profiles,
     load_optional_sensor_overrides,
     normalize_active_arms,
@@ -42,6 +41,18 @@ def _clean_metadata(sensor: dict[str, Any]) -> dict[str, Any]:
         for key, value in sensor.items()
         if key not in reserved and value not in {"", None}
     }
+
+
+def _topic_sensor_slot(topic: str) -> str | None:
+    if topic.startswith("/spark/cameras/wrist/"):
+        return "wrist"
+    if topic.startswith("/spark/cameras/scene/"):
+        return "scene"
+    if topic.startswith("/spark/tactile/left/"):
+        return "left"
+    if topic.startswith("/spark/tactile/right/"):
+        return "right"
+    return None
 
 
 def _canonical_role_from_sensor_name(
@@ -86,6 +97,76 @@ def _arm_devices(active_arms: list[str]) -> list[dict[str, Any]]:
     ]
 
 
+def _runtime_slot_for_device(device: dict[str, Any]) -> str | None:
+    if not bool(device.get("enabled", False)):
+        return None
+
+    kind = str(device.get("kind", "")).strip()
+    role = str(device.get("resolved_role", "")).strip()
+    if kind == "realsense":
+        if role.startswith("scene_"):
+            return "scene"
+        if "_wrist_" in role:
+            return "wrist"
+    if kind == "gelsight":
+        if role.endswith("finger_left"):
+            return "left"
+        if role.endswith("finger_right"):
+            return "right"
+    return None
+
+
+def _selected_topics_for_session(
+    *,
+    profile: dict[str, Any],
+    devices: list[dict[str, Any]],
+    extra_topics: list[str],
+) -> list[str]:
+    topics: set[str] = set()
+    published = profile.get("published", {})
+    enabled_slots = {slot for slot in (_runtime_slot_for_device(device) for device in devices) if slot}
+
+    for arm_sources in published.get("observation_state", {}).get("sources", {}).values():
+        topics.update(arm_sources.values())
+
+    for arm_sources in published.get("action", {}).get("sources", {}).values():
+        topics.update(arm_sources.values())
+
+    teleop_activity_topic = str(profile.get("teleop_activity", {}).get("topic", "")).strip()
+    if teleop_activity_topic:
+        topics.add(teleop_activity_topic)
+
+    for image_spec in published.get("images", []):
+        topic = str(image_spec.get("topic", "")).strip()
+        if not topic:
+            continue
+        slot = _topic_sensor_slot(topic)
+        if slot is None or slot in enabled_slots:
+            topics.add(topic)
+
+    for depth_spec in profile.get("published_depth", []):
+        topic = str(depth_spec.get("topic", "")).strip()
+        if not topic:
+            continue
+        slot = _topic_sensor_slot(topic)
+        if slot is None or slot in enabled_slots:
+            topics.add(topic)
+
+    for topic in profile.get("raw_only_topics", []):
+        topic_str = str(topic).strip()
+        if not topic_str:
+            continue
+        slot = _topic_sensor_slot(topic_str)
+        if slot is None or slot in enabled_slots:
+            topics.add(topic_str)
+
+    for topic in extra_topics:
+        if topic:
+            topics.add(topic)
+
+    return sorted(topics)
+
+
 def _camera_device(
     *,
     device_kind: str,
@@ -117,14 +198,65 @@ def _camera_device(
     return device
 
 
+def _device_from_session_config(
+    *,
+    entry: dict[str, Any],
+    sensor_overrides: dict[str, dict[str, Any]],
+    active_arms: list[str],
+) -> dict[str, Any]:
+    kind = str(entry.get("kind", "")).strip() or "device"
+    overlay_key = str(entry.get("overlay_key", "")).strip()
+    overlay_sensor = sensor_overrides.get(overlay_key, {}) if overlay_key else {}
+
+    identifier = str(entry.get("identifier", "")).strip()
+    serial_number = str(entry.get("serial_number", "")).strip()
+    device_path = str(entry.get("device_path", "")).strip()
+    if not serial_number and kind == "realsense":
+        serial_number = identifier
+    if not device_path and kind == "gelsight":
+        device_path = identifier
+
+    role = (
+        str(entry.get("resolved_role", "")).strip()
+        or str(entry.get("suggested_role", "")).strip()
+        or _canonical_role_from_sensor_name(overlay_key or kind, overlay_sensor, active_arms)
+    )
+
+    merged_sensor = dict(overlay_sensor)
+    for key in ("sensor_id", "attached_to", "mount_site", "model", "calibration_ref"):
+        value = entry.get(key)
+        if value not in {"", None}:
+            merged_sensor[key] = value
+    if serial_number:
+        merged_sensor["serial_number"] = serial_number
+
+    base = _camera_device(
+        device_kind=kind,
+        serial_number=serial_number or overlay_sensor.get("serial_number"),
+        enabled=bool(entry.get("enabled", False)),
+        sensor_name=overlay_key or kind,
+        sensor=merged_sensor,
+        active_arms=active_arms,
+    )
+    base["suggested_role"] = str(entry.get("suggested_role", "")).strip() or base["suggested_role"]
+    base["resolved_role"] = role
+    base["device_id"] = str(entry.get("device_id", "")).strip() or base["device_id"]
+    if identifier:
+        base["identifier"] = identifier
+    if device_path:
+        base["device_path"] = device_path
+    if overlay_key:
+        base["overlay_key"] = overlay_key
+    source = str(entry.get("source", "")).strip()
+    if source:
+        base["source"] = source
+    return base
+
+
 def build_session_capture_plan(config: dict[str, Any], session_id: str) -> dict[str, Any]:
     active_arms = normalize_active_arms(parse_task_list(str(config.get("active_arms", ""))))
     profile, profile_path = resolve_profile_for_active_arms("auto", active_arms)
     extra_topics = parse_task_list(str(config.get("extra_topics", "")))
-    selected_topics = collect_candidate_topics(profile)
-    for topic in extra_topics:
-        if topic not in selected_topics:
-            selected_topics.append(topic)
 
     sensors_file = str(config.get("sensors_file", "")).strip()
     sensor_overrides = load_optional_sensor_overrides(sensors_file) if sensors_file and Path(sensors_file).exists() else {}
@@ -135,55 +267,82 @@ def build_session_capture_plan(config: dict[str, Any], session_id: str) -> dict[
 
     devices = _arm_devices(active_arms)
 
-    if bool(config.get("realsense_enabled", True)):
-        wrist_serial = str(config.get("wrist_serial_no", "")).strip()
-        if wrist_serial:
+    configured_session_devices = config.get("session_devices", [])
+    if isinstance(configured_session_devices, list) and configured_session_devices:
+        for entry in configured_session_devices:
+            if not isinstance(entry, dict):
+                continue
             devices.append(
-                _camera_device(
-                    device_kind="realsense",
-                    serial_number=wrist_serial,
-                    enabled=True,
-                    sensor_name="wrist",
-                    sensor=sensor_overrides.get("wrist", {}),
+                _device_from_session_config(
+                    entry=entry,
+                    sensor_overrides=sensor_overrides,
                     active_arms=active_arms,
                 )
             )
-        scene_serial = str(config.get("scene_serial_no", "")).strip()
-        if scene_serial:
-            devices.append(
-                _camera_device(
-                    device_kind="realsense",
-                    serial_number=scene_serial,
-                    enabled=True,
-                    sensor_name="scene",
-                    sensor=sensor_overrides.get("scene", {}),
-                    active_arms=active_arms,
+    else:
+        if bool(config.get("realsense_enabled", True)):
+            wrist_serial = str(config.get("wrist_serial_no", "")).strip()
+            if wrist_serial:
+                devices.append(
+                    _camera_device(
+                        device_kind="realsense",
+                        serial_number=wrist_serial,
+                        enabled=True,
+                        sensor_name="wrist",
+                        sensor=sensor_overrides.get("wrist", {}),
+                        active_arms=active_arms,
+                    )
                 )
-            )
+            scene_serial = str(config.get("scene_serial_no", "")).strip()
+            if scene_serial:
+                devices.append(
+                    _camera_device(
+                        device_kind="realsense",
+                        serial_number=scene_serial,
+                        enabled=True,
+                        sensor_name="scene",
+                        sensor=sensor_overrides.get("scene", {}),
+                        active_arms=active_arms,
+                    )
+                )
 
-    if bool(config.get("gelsight_enabled", False)):
-        if bool(config.get("gelsight_enable_left", False)):
-            devices.append(
-                _camera_device(
-                    device_kind="gelsight",
-                    serial_number=str(sensor_overrides.get("left", {}).get("serial_number", "")).strip() or None,
-                    enabled=True,
-                    sensor_name="left",
-                    sensor=sensor_overrides.get("left", {}),
-                    active_arms=active_arms,
+        if bool(config.get("gelsight_enabled", False)):
+            if bool(config.get("gelsight_enable_left", False)):
+                left_sensor = dict(sensor_overrides.get("left", {}))
+                left_path = str(config.get("gelsight_left_device_path", "")).strip()
+                if left_path:
+                    left_sensor["device_path"] = left_path
+                devices.append(
+                    _camera_device(
+                        device_kind="gelsight",
+                        serial_number=str(left_sensor.get("serial_number", "")).strip() or None,
+                        enabled=True,
+                        sensor_name="left",
+                        sensor=left_sensor,
+                        active_arms=active_arms,
+                    )
                 )
-            )
-        if bool(config.get("gelsight_enable_right", False)):
-            devices.append(
-                _camera_device(
-                    device_kind="gelsight",
-                    serial_number=str(sensor_overrides.get("right", {}).get("serial_number", "")).strip() or None,
-                    enabled=True,
-                    sensor_name="right",
-                    sensor=sensor_overrides.get("right", {}),
-                    active_arms=active_arms,
+            if bool(config.get("gelsight_enable_right", False)):
+                right_sensor = dict(sensor_overrides.get("right", {}))
+                right_path = str(config.get("gelsight_right_device_path", "")).strip()
+                if right_path:
+                    right_sensor["device_path"] = right_path
+                devices.append(
+                    _camera_device(
+                        device_kind="gelsight",
+                        serial_number=str(right_sensor.get("serial_number", "")).strip() or None,
+                        enabled=True,
+                        sensor_name="right",
+                        sensor=right_sensor,
+                        active_arms=active_arms,
+                    )
                 )
-            )
+
+    selected_topics = _selected_topics_for_session(
+        profile=profile,
+        devices=devices,
+        extra_topics=extra_topics,
+    )
 
     compatibility_entries = [
         profile_compatibility_entry(

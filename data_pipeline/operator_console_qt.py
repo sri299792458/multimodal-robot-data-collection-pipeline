@@ -11,6 +11,7 @@ from pathlib import Path
 try:
     from PySide6.QtCore import QSocketNotifier, QTimer, Qt
     from PySide6.QtWidgets import (
+        QAbstractItemView,
         QApplication,
         QCheckBox,
         QComboBox,
@@ -27,6 +28,8 @@ try:
         QScrollArea,
         QSizePolicy,
         QSplitter,
+        QTableWidget,
+        QTableWidgetItem,
         QVBoxLayout,
         QWidget,
     )
@@ -44,6 +47,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from data_pipeline.operator_console_backend import OperatorConsoleBackend
+from data_pipeline.pipeline_utils import load_optional_sensor_overrides
 
 
 STATUS_STYLES = {
@@ -53,6 +57,20 @@ STATUS_STYLES = {
     "off": "background:#eceff2;color:#495057;border:1px solid #cbd3db;",
     "info": "background:#e7eef8;color:#29415f;border:1px solid #c3d3ea;",
 }
+
+DEVICE_ROLE_CHOICES = [
+    "lightning_wrist_0",
+    "thunder_wrist_0",
+    "scene_0",
+    "scene_1",
+    "scene_2",
+    "lightning_finger_left",
+    "lightning_finger_right",
+    "thunder_finger_left",
+    "thunder_finger_right",
+]
+
+DEVICE_KIND_CHOICES = ["realsense", "gelsight"]
 
 
 def apply_chip_style(label: QLabel, tone: str) -> None:
@@ -251,36 +269,51 @@ class OperatorConsoleQtWindow(QMainWindow):
         return box
 
     def _build_sensor_box(self) -> QWidget:
-        box = QGroupBox("Session Inputs")
-        form = QFormLayout(box)
+        box = QGroupBox("Session Devices")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        form = QFormLayout()
         form.setSpacing(10)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
-
         self.form_widgets["sensors_file"] = QLineEdit("data_pipeline/configs/sensors.local.yaml")
-        self.form_widgets["realsense_enabled"] = QCheckBox("Enable RealSense")
-        self.form_widgets["realsense_enabled"].setChecked(True)
-        self.form_widgets["wrist_serial_no"] = QLineEdit()
-        self.form_widgets["scene_serial_no"] = QLineEdit()
-        self.form_widgets["gelsight_enable_left"] = QCheckBox("Record Left GelSight")
-        self.form_widgets["gelsight_enable_right"] = QCheckBox("Record Right GelSight")
-        self.form_widgets["gelsight_left_device_path"] = QLineEdit()
-        self.form_widgets["gelsight_right_device_path"] = QLineEdit()
         self.form_widgets["viewer_base_url"] = QLineEdit("http://10.33.55.65:3000")
+        form.addRow("Sensors File", self.form_widgets["sensors_file"])
+        form.addRow("Viewer Base URL", self.form_widgets["viewer_base_url"])
+        layout.addLayout(form)
 
-        for label, key in [
-            ("Sensors File", "sensors_file"),
-            ("Wrist Camera Serial", "wrist_serial_no"),
-            ("Scene Camera Serial", "scene_serial_no"),
-            ("GelSight Left Path", "gelsight_left_device_path"),
-            ("GelSight Right Path", "gelsight_right_device_path"),
-            ("Viewer Base URL", "viewer_base_url"),
-        ]:
-            form.addRow(label, self.form_widgets[key])
+        self.session_devices_table = QTableWidget(0, 5)
+        self.session_devices_table.setHorizontalHeaderLabels(["Record", "Kind", "Identifier", "Role", "Source"])
+        self.session_devices_table.verticalHeader().setVisible(False)
+        self.session_devices_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.session_devices_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.session_devices_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.session_devices_table.horizontalHeader().setStretchLastSection(True)
+        self.session_devices_table.setColumnWidth(0, 70)
+        self.session_devices_table.setColumnWidth(1, 100)
+        self.session_devices_table.setColumnWidth(2, 220)
+        self.session_devices_table.setColumnWidth(3, 170)
+        layout.addWidget(self.session_devices_table)
 
-        form.addRow("", self.form_widgets["realsense_enabled"])
-        form.addRow("", self.form_widgets["gelsight_enable_left"])
-        form.addRow("", self.form_widgets["gelsight_enable_right"])
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
+        self.reset_devices_button = QPushButton("Reset From Preset")
+        self.reset_devices_button.clicked.connect(self._reset_session_devices_from_current_preset)
+        add_camera = QPushButton("Add Camera")
+        add_camera.clicked.connect(lambda: self._append_session_device_row({"kind": "realsense"}))
+        add_gelsight = QPushButton("Add GelSight")
+        add_gelsight.clicked.connect(lambda: self._append_session_device_row({"kind": "gelsight"}))
+        remove_selected = QPushButton("Remove Selected")
+        remove_selected.clicked.connect(self._remove_selected_session_device_row)
+        controls.addWidget(self.reset_devices_button)
+        controls.addWidget(add_camera)
+        controls.addWidget(add_gelsight)
+        controls.addWidget(remove_selected)
+        controls.addStretch(1)
+        layout.addLayout(controls)
         return box
 
     def _build_session_plan_box(self) -> QWidget:
@@ -331,6 +364,213 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.session_plan_topics_text.setMaximumHeight(120)
         layout.addWidget(self.session_plan_topics_text)
         return box
+
+    def _canonical_role_from_overlay(self, overlay_key: str, sensor: dict[str, object], active_arms: list[str]) -> str:
+        attached_to = str(sensor.get("attached_to", "")).strip()
+        mount_site = str(sensor.get("mount_site", "")).strip()
+        if mount_site.startswith("scene_"):
+            return mount_site
+        if mount_site == "wrist" and attached_to:
+            return f"{attached_to}_wrist_0"
+        if mount_site.startswith("finger_") and attached_to:
+            return f"{attached_to}_{mount_site}"
+        primary_arm = active_arms[0] if active_arms else "lightning"
+        fallback = {
+            "wrist": f"{primary_arm}_wrist_0",
+            "scene": "scene_0",
+            "left": f"{primary_arm}_finger_left",
+            "right": f"{primary_arm}_finger_right",
+        }
+        return fallback.get(overlay_key, overlay_key)
+
+    def _default_session_devices_for_preset(self, preset: dict[str, object]) -> list[dict[str, object]]:
+        sensors_file = str(preset.get("sensors_file", "data_pipeline/configs/sensors.local.yaml")).strip()
+        try:
+            sensor_overrides = load_optional_sensor_overrides(sensors_file)
+        except Exception:
+            sensor_overrides = {}
+
+        active_arms = [arm.strip() for arm in str(preset.get("active_arms", "lightning")).split(",") if arm.strip()]
+        if not active_arms:
+            active_arms = ["lightning"]
+
+        devices: list[dict[str, object]] = []
+        realsense = preset.get("realsense", {}) if isinstance(preset.get("realsense", {}), dict) else {}
+        gelsight = preset.get("gelsight", {}) if isinstance(preset.get("gelsight", {}), dict) else {}
+
+        def add_overlay_device(
+            *,
+            kind: str,
+            overlay_key: str,
+            identifier: str,
+            enabled: bool,
+            source: str,
+            extra: dict[str, object] | None = None,
+        ) -> None:
+            sensor = dict(sensor_overrides.get(overlay_key, {}))
+            role = self._canonical_role_from_overlay(overlay_key, sensor, active_arms)
+            entry: dict[str, object] = {
+                "kind": kind,
+                "identifier": identifier,
+                "enabled": enabled,
+                "suggested_role": role,
+                "resolved_role": role,
+                "overlay_key": overlay_key,
+                "source": source,
+            }
+            for key in ("model", "sensor_id", "attached_to", "mount_site", "calibration_ref"):
+                if sensor.get(key) not in {"", None}:
+                    entry[key] = sensor[key]
+            if extra:
+                entry.update(extra)
+            devices.append(entry)
+
+        wrist_serial = str(realsense.get("wrist_serial_no", "")).strip()
+        if wrist_serial or bool(realsense.get("enabled", True)):
+            add_overlay_device(
+                kind="realsense",
+                overlay_key="wrist",
+                identifier=wrist_serial,
+                enabled=bool(realsense.get("enabled", True)),
+                source="preset",
+                extra={"serial_number": wrist_serial},
+            )
+
+        scene_serial = str(realsense.get("scene_serial_no", "")).strip()
+        if scene_serial or bool(realsense.get("enabled", True)):
+            add_overlay_device(
+                kind="realsense",
+                overlay_key="scene",
+                identifier=scene_serial,
+                enabled=bool(realsense.get("enabled", True)),
+                source="preset",
+                extra={"serial_number": scene_serial},
+            )
+
+        left_path = str(gelsight.get("left_device_path", "")).strip()
+        if left_path or bool(gelsight.get("enable_left", False)):
+            add_overlay_device(
+                kind="gelsight",
+                overlay_key="left",
+                identifier=left_path,
+                enabled=bool(gelsight.get("enable_left", False)),
+                source="preset",
+                extra={"device_path": left_path},
+            )
+
+        right_path = str(gelsight.get("right_device_path", "")).strip()
+        if right_path or bool(gelsight.get("enable_right", False)):
+            add_overlay_device(
+                kind="gelsight",
+                overlay_key="right",
+                identifier=right_path,
+                enabled=bool(gelsight.get("enable_right", False)),
+                source="preset",
+                extra={"device_path": right_path},
+            )
+
+        return devices
+
+    def _set_session_devices(self, devices: list[dict[str, object]]) -> None:
+        self.session_devices_table.setRowCount(0)
+        for device in devices:
+            self._append_session_device_row(device)
+
+    def _append_session_device_row(self, device: dict[str, object]) -> None:
+        row = self.session_devices_table.rowCount()
+        self.session_devices_table.insertRow(row)
+
+        enabled = QCheckBox()
+        enabled.setChecked(bool(device.get("enabled", False)))
+        enabled.setStyleSheet("margin-left:18px;")
+        self.session_devices_table.setCellWidget(row, 0, enabled)
+
+        kind_combo = QComboBox()
+        kind_combo.addItems(DEVICE_KIND_CHOICES)
+        kind_value = str(device.get("kind", "realsense")).strip() or "realsense"
+        index = kind_combo.findText(kind_value)
+        kind_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.session_devices_table.setCellWidget(row, 1, kind_combo)
+
+        identifier_edit = QLineEdit(str(device.get("identifier", "")).strip())
+        self.session_devices_table.setCellWidget(row, 2, identifier_edit)
+
+        role_combo = QComboBox()
+        role_combo.addItems(DEVICE_ROLE_CHOICES)
+        role_value = str(device.get("resolved_role", "")).strip() or str(device.get("suggested_role", "")).strip()
+        if role_value and role_combo.findText(role_value) < 0:
+            role_combo.addItem(role_value)
+        role_combo.setCurrentText(role_value)
+        self.session_devices_table.setCellWidget(row, 3, role_combo)
+
+        source_item = QTableWidgetItem(str(device.get("source", "")).strip() or "manual")
+        source_item.setData(
+            Qt.ItemDataRole.UserRole,
+            {
+                "overlay_key": str(device.get("overlay_key", "")).strip(),
+                "suggested_role": str(device.get("suggested_role", "")).strip(),
+                "model": device.get("model"),
+                "sensor_id": device.get("sensor_id"),
+                "attached_to": device.get("attached_to"),
+                "mount_site": device.get("mount_site"),
+                "calibration_ref": device.get("calibration_ref"),
+            },
+        )
+        self.session_devices_table.setItem(row, 4, source_item)
+
+    def _session_devices(self) -> list[dict[str, object]]:
+        devices: list[dict[str, object]] = []
+        for row in range(self.session_devices_table.rowCount()):
+            enabled_widget = self.session_devices_table.cellWidget(row, 0)
+            kind_widget = self.session_devices_table.cellWidget(row, 1)
+            identifier_widget = self.session_devices_table.cellWidget(row, 2)
+            role_widget = self.session_devices_table.cellWidget(row, 3)
+            source_item = self.session_devices_table.item(row, 4)
+            if not isinstance(enabled_widget, QCheckBox):
+                continue
+            if not isinstance(kind_widget, QComboBox):
+                continue
+            if not isinstance(identifier_widget, QLineEdit):
+                continue
+            if not isinstance(role_widget, QComboBox):
+                continue
+            metadata = source_item.data(Qt.ItemDataRole.UserRole) if source_item is not None else {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            kind = kind_widget.currentText().strip()
+            identifier = identifier_widget.text().strip()
+            role = role_widget.currentText().strip()
+            device: dict[str, object] = {
+                "kind": kind,
+                "identifier": identifier,
+                "enabled": enabled_widget.isChecked(),
+                "suggested_role": str(metadata.get("suggested_role", "")).strip() or role,
+                "resolved_role": role,
+                "overlay_key": str(metadata.get("overlay_key", "")).strip(),
+                "source": source_item.text().strip() if source_item is not None else "manual",
+            }
+            for key in ("model", "sensor_id", "attached_to", "mount_site", "calibration_ref"):
+                value = metadata.get(key)
+                if value not in {"", None}:
+                    device[key] = value
+            if kind == "realsense":
+                device["serial_number"] = identifier
+            elif kind == "gelsight":
+                device["device_path"] = identifier
+            devices.append(device)
+        return devices
+
+    def _remove_selected_session_device_row(self) -> None:
+        current_row = self.session_devices_table.currentRow()
+        if current_row >= 0:
+            self.session_devices_table.removeRow(current_row)
+
+    def _reset_session_devices_from_current_preset(self) -> None:
+        preset_id = self.preset_combo.currentText().strip()
+        if not preset_id:
+            return
+        self._set_session_devices(self._default_session_devices_for_preset(self.backend.get_preset(preset_id)))
 
     def _build_optional_box(self) -> QWidget:
         box = QGroupBox("Optional")
@@ -522,16 +762,10 @@ class OperatorConsoleQtWindow(QMainWindow):
             self._set_field("operator", str(preset.get("operator", "")))
         self._set_field("active_arms", str(preset.get("active_arms", "lightning")))
         self._set_field("sensors_file", str(preset.get("sensors_file", "data_pipeline/configs/sensors.local.yaml")))
-        self._set_field("realsense_enabled", bool(preset.get("realsense", {}).get("enabled", True)))
-        self._set_field("wrist_serial_no", str(preset.get("realsense", {}).get("wrist_serial_no", "")))
-        self._set_field("scene_serial_no", str(preset.get("realsense", {}).get("scene_serial_no", "")))
-        self._set_field("gelsight_enable_left", bool(preset.get("gelsight", {}).get("enable_left", False)))
-        self._set_field("gelsight_enable_right", bool(preset.get("gelsight", {}).get("enable_right", False)))
-        self._set_field("gelsight_left_device_path", str(preset.get("gelsight", {}).get("left_device_path", "")))
-        self._set_field("gelsight_right_device_path", str(preset.get("gelsight", {}).get("right_device_path", "")))
         self._set_field("viewer_base_url", str(preset.get("viewer_base_url", "")))
         self._set_field("notes", "")
         self._set_field("extra_topics", "")
+        self._set_session_devices(self._default_session_devices_for_preset(preset))
 
     def _set_field(self, key: str, value: str | bool) -> None:
         widget = self.form_widgets[key]
@@ -557,9 +791,48 @@ class OperatorConsoleQtWindow(QMainWindow):
         raise TypeError(f"Unsupported widget type for {key}")
 
     def _config(self) -> dict[str, object]:
-        realsense_enabled = bool(self._get_field("realsense_enabled"))
-        gelsight_enable_left = bool(self._get_field("gelsight_enable_left"))
-        gelsight_enable_right = bool(self._get_field("gelsight_enable_right"))
+        session_devices = self._session_devices()
+        enabled_realsense = [
+            device for device in session_devices
+            if bool(device.get("enabled", False)) and str(device.get("kind", "")).strip() == "realsense"
+        ]
+        enabled_gelsights = [
+            device for device in session_devices
+            if bool(device.get("enabled", False)) and str(device.get("kind", "")).strip() == "gelsight"
+        ]
+
+        wrist_device = next(
+            (
+                device
+                for device in enabled_realsense
+                if "_wrist_" in str(device.get("resolved_role", "")).strip()
+            ),
+            None,
+        )
+        scene_device = next(
+            (
+                device
+                for device in enabled_realsense
+                if str(device.get("resolved_role", "")).strip().startswith("scene_")
+            ),
+            None,
+        )
+        left_gelsight = next(
+            (
+                device
+                for device in enabled_gelsights
+                if str(device.get("resolved_role", "")).strip().endswith("finger_left")
+            ),
+            None,
+        )
+        right_gelsight = next(
+            (
+                device
+                for device in enabled_gelsights
+                if str(device.get("resolved_role", "")).strip().endswith("finger_right")
+            ),
+            None,
+        )
         return {
             "preset_id": self.preset_combo.currentText().strip(),
             "dataset_id": self._get_field("dataset_id"),
@@ -569,14 +842,15 @@ class OperatorConsoleQtWindow(QMainWindow):
             "operator": self._get_field("operator"),
             "active_arms": self._get_field("active_arms"),
             "sensors_file": self._get_field("sensors_file"),
-            "wrist_serial_no": self._get_field("wrist_serial_no"),
-            "scene_serial_no": self._get_field("scene_serial_no"),
-            "realsense_enabled": realsense_enabled,
-            "gelsight_enabled": gelsight_enable_left or gelsight_enable_right,
-            "gelsight_enable_left": gelsight_enable_left,
-            "gelsight_enable_right": gelsight_enable_right,
-            "gelsight_left_device_path": self._get_field("gelsight_left_device_path"),
-            "gelsight_right_device_path": self._get_field("gelsight_right_device_path"),
+            "session_devices": session_devices,
+            "wrist_serial_no": str((wrist_device or {}).get("serial_number", "")).strip(),
+            "scene_serial_no": str((scene_device or {}).get("serial_number", "")).strip(),
+            "realsense_enabled": bool(enabled_realsense),
+            "gelsight_enabled": bool(enabled_gelsights),
+            "gelsight_enable_left": left_gelsight is not None,
+            "gelsight_enable_right": right_gelsight is not None,
+            "gelsight_left_device_path": str((left_gelsight or {}).get("device_path", "")).strip(),
+            "gelsight_right_device_path": str((right_gelsight or {}).get("device_path", "")).strip(),
             "viewer_base_url": self._get_field("viewer_base_url"),
             "notes": self._get_field("notes"),
             "extra_topics": self._get_field("extra_topics"),
@@ -688,10 +962,14 @@ class OperatorConsoleQtWindow(QMainWindow):
         for device in devices:
             kind = str(device.get("kind", "device")).strip()
             model = str(device.get("model", "")).strip()
-            serial = str(device.get("serial_number", "")).strip()
+            identifier = (
+                str(device.get("serial_number", "")).strip()
+                or str(device.get("device_path", "")).strip()
+                or str(device.get("identifier", "")).strip()
+            )
             role = str(device.get("resolved_role", "")).strip()
             enabled = "enabled" if bool(device.get("enabled", False)) else "disabled"
-            left = " ".join(part for part in [kind, model, serial] if part)
+            left = " ".join(part for part in [kind, model, identifier] if part)
             right = " | ".join(part for part in [enabled, role] if part)
             device_lines.append(f"{left} -> {right}".strip())
         self.session_plan_devices_text.setPlainText("\n".join(device_lines) if device_lines else "No devices resolved.")
