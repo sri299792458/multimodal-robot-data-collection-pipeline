@@ -9,9 +9,11 @@ from typing import Any
 
 from data_pipeline.pipeline_utils import (
     collect_candidate_topics,
+    list_known_profiles,
     load_optional_sensor_overrides,
     normalize_active_arms,
     parse_task_list,
+    profile_compatibility_entry,
     resolve_profile_for_active_arms,
 )
 
@@ -119,10 +121,10 @@ def build_session_capture_plan(config: dict[str, Any], session_id: str) -> dict[
     active_arms = normalize_active_arms(parse_task_list(str(config.get("active_arms", ""))))
     profile, profile_path = resolve_profile_for_active_arms("auto", active_arms)
     extra_topics = parse_task_list(str(config.get("extra_topics", "")))
-    planned_topics = collect_candidate_topics(profile)
+    selected_topics = collect_candidate_topics(profile)
     for topic in extra_topics:
-        if topic not in planned_topics:
-            planned_topics.append(topic)
+        if topic not in selected_topics:
+            selected_topics.append(topic)
 
     sensors_file = str(config.get("sensors_file", "")).strip()
     sensor_overrides = load_optional_sensor_overrides(sensors_file) if sensors_file and Path(sensors_file).exists() else {}
@@ -183,22 +185,34 @@ def build_session_capture_plan(config: dict[str, Any], session_id: str) -> dict[
                 )
             )
 
+    compatibility_entries = [
+        profile_compatibility_entry(
+            profile=known_profile,
+            profile_path=known_profile_path,
+            active_arms=active_arms,
+            selected_topics=selected_topics,
+        )
+        for known_profile, known_profile_path in list_known_profiles()
+    ]
+    publishable_profiles = [entry for entry in compatibility_entries if entry["compatible"]]
+    incompatible_profiles = [entry for entry in compatibility_entries if not entry["compatible"]]
+
     return {
         "schema_version": 1,
         "contract_version": "v1",
         "session_id": session_id,
         "active_arms": active_arms,
         "local_overlays": local_overlays,
-        "resolved_devices": devices,
-        "planned_topics": sorted(planned_topics),
+        "default_published_profile": {
+            "name": profile["profile_name"],
+            "path": str(profile_path),
+            "selection_rule": "auto_from_active_arms_v1",
+        },
+        "discovered_devices": devices,
+        "selected_topics": sorted(selected_topics),
+        "selected_extra_topics": sorted(extra_topics),
         "profile_compatibility": {
-            "publishable_profiles": [
-                {
-                    "name": profile["profile_name"],
-                    "path": str(profile_path),
-                    "compatible": True,
-                }
-            ],
-            "incompatible_profiles": [],
+            "publishable_profiles": publishable_profiles,
+            "incompatible_profiles": incompatible_profiles,
         },
     }

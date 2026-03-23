@@ -1882,3 +1882,19 @@
 - Updated [record_episode.py](/home/srinivas/Desktop/pipeline/data_pipeline/record_episode.py) so the raw episode manifest can embed the resolved session plan under a new optional top-level `session` section.
 - Bumped the manifest schema version to `4` because this adds a new manifest section and the old shape is no longer treated as something we need to preserve.
 - This does not solve the larger multi-camera or richer role-assignment problem yet; it only establishes the explicit session-plan object so the next implementation steps have the right boundary.
+
+### Second session-capture implementation slice
+
+- Made the session capture plan authoritative for raw topic selection when it is passed into [record_episode.py](/home/srinivas/Desktop/pipeline/data_pipeline/record_episode.py).
+- The recorder no longer recomputes raw topics from the profile when a session plan is present:
+  - it records the session plan's `selected_topics`
+  - it preserves `selected_extra_topics`
+  - it still checks that the resolved published profile is compatible before recording
+- Expanded [session_capture_plan.py](/home/srinivas/Desktop/pipeline/data_pipeline/session_capture_plan.py) to carry:
+  - `default_published_profile`
+  - `discovered_devices`
+  - `selected_topics`
+  - `selected_extra_topics`
+  - real `profile_compatibility` against all known published profiles, not just the auto profile for the current active arms
+- Added profile-compatibility helpers in [pipeline_utils.py](/home/srinivas/Desktop/pipeline/data_pipeline/pipeline_utils.py) so the capture-plan layer can answer which shared published schemas the current session can satisfy before any UI rewrite.
+- This is the backend/model cutoff point before UI work: the session plan is now a real control surface, not just a snapshot artifact.

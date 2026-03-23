@@ -127,8 +127,10 @@ Minimum expectations for each section:
   - `session_id`
   - `active_arms`
   - `local_overlays`
-  - `resolved_devices`
-  - `planned_topics`
+  - `default_published_profile`
+  - `discovered_devices`
+  - `selected_topics`
+  - `selected_extra_topics`
   - `profile_compatibility`
 - `capture`
   - `start_time_ns`

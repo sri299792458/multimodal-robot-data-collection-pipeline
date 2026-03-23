@@ -36,6 +36,7 @@ from data_pipeline.pipeline_utils import (
     normalize_active_arms,
     now_ns,
     parse_task_list,
+    profile_compatibility_entry,
     required_topics_from_profile,
     resolve_profile_for_active_arms,
     write_json,
@@ -83,6 +84,29 @@ def select_topics(profile: dict, live_topics: dict[str, str], extra_topics: list
             selected.append(topic)
 
     return sorted(selected), missing_required
+
+
+def select_topics_from_session_plan(
+    session_capture_plan: dict,
+    live_topics: dict[str, str],
+) -> tuple[list[str], list[str], list[str]]:
+    selected_topics = [
+        str(topic).strip()
+        for topic in session_capture_plan.get("selected_topics", [])
+        if str(topic).strip()
+    ]
+    if not selected_topics:
+        raise RuntimeError("Session capture plan does not define any selected_topics.")
+
+    plan_extra_topics = [
+        str(topic).strip()
+        for topic in session_capture_plan.get("selected_extra_topics", [])
+        if str(topic).strip()
+    ]
+    missing_topics = [topic for topic in selected_topics if topic not in live_topics]
+    if missing_topics:
+        raise RuntimeError(f"Session plan topics are not live: {missing_topics}")
+    return sorted(dict.fromkeys(selected_topics)), missing_topics, sorted(dict.fromkeys(plan_extra_topics))
 
 
 def build_manifest(
@@ -352,8 +376,27 @@ def main(argv: list[str] | None = None) -> int:
 
     live_topics = list_live_topics()
     active_arms = normalize_active_arms(parse_task_list(args.active_arms))
+    if session_capture_plan is not None:
+        plan_active_arms = normalize_active_arms(session_capture_plan.get("active_arms", active_arms))
+        if plan_active_arms != active_arms:
+            raise RuntimeError(
+                f"Session plan active arms {plan_active_arms} do not match requested active arms {active_arms}"
+            )
     profile, resolved_profile_path = resolve_profile_for_active_arms(args.profile, active_arms)
-    selected_topics, _ = select_topics(profile, live_topics, extra_topics)
+    if session_capture_plan is not None:
+        selected_topics, _, extra_topics = select_topics_from_session_plan(session_capture_plan, live_topics)
+        compatibility = profile_compatibility_entry(
+            profile=profile,
+            profile_path=resolved_profile_path,
+            active_arms=active_arms,
+            selected_topics=selected_topics,
+        )
+        if not compatibility["compatible"]:
+            raise RuntimeError(
+                f"Session plan is not compatible with profile {compatibility['name']}: {compatibility['reasons']}"
+            )
+    else:
+        selected_topics, _ = select_topics(profile, live_topics, extra_topics)
 
     if args.dry_run:
         dry_run_manifest = build_manifest(

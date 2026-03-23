@@ -386,3 +386,24 @@ The first implemented slice is intentionally narrow:
 This does not fully realize runtime device discovery or flexible role assignment yet.
 
 Its purpose is to create the missing explicit boundary so future work can replace the current rigid UI and config assumptions without again entangling session state with published profile YAMLs.
+
+## Second Implementation Slice
+
+The second implemented slice makes the session capture plan operational instead of purely descriptive:
+
+- `record_episode.py` now records the session plan's `selected_topics` when `--session-plan-file ...` is provided
+- `selected_extra_topics` are preserved from the session plan instead of being recomputed from the CLI
+- the recorder still validates that the resolved published profile is compatible before recording
+- session plans now carry:
+  - `default_published_profile`
+  - `discovered_devices`
+  - `selected_topics`
+  - `selected_extra_topics`
+  - real `profile_compatibility` against all known published profiles
+
+This is still transitional because device discovery and role assignment are not yet dynamic in the UI.
+
+But it completes the important backend separation:
+
+- the session plan now chooses what raw topics are recorded
+- published profiles now act as compatibility/schema checks instead of being the sole thing that determines the raw topic set

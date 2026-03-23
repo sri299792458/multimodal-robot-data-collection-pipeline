@@ -152,6 +152,14 @@ def resolve_profile_for_active_arms(
     )
 
 
+def list_known_profiles() -> list[tuple[dict[str, Any], Path]]:
+    profiles: list[tuple[dict[str, Any], Path]] = []
+    for profile_name in sorted(PROFILE_NAME_TO_PATH):
+        profile_path = profile_path_for_name(profile_name)
+        profiles.append((load_profile(profile_path), profile_path))
+    return profiles
+
+
 def collect_candidate_topics(profile: dict[str, Any]) -> list[str]:
     topics: set[str] = set()
 
@@ -196,6 +204,40 @@ def required_topics_from_profile(profile: dict[str, Any]) -> list[str]:
         required.add(teleop_activity_topic)
 
     return sorted(required)
+
+
+def profile_compatibility_entry(
+    *,
+    profile: dict[str, Any],
+    profile_path: str | Path,
+    active_arms: list[str] | tuple[str, ...] | set[str],
+    selected_topics: list[str] | tuple[str, ...] | set[str],
+) -> dict[str, Any]:
+    normalized_arms = normalize_active_arms(active_arms)
+    required_arms = profile_required_arms(profile)
+    selected_topic_set = {str(topic).strip() for topic in selected_topics if str(topic).strip()}
+    missing_topics = [
+        topic
+        for topic in required_topics_from_profile(profile)
+        if topic not in selected_topic_set
+    ]
+
+    reasons: list[str] = []
+    if required_arms != normalized_arms:
+        reasons.append(
+            f"requires active arms {required_arms}, but session active arms are {normalized_arms}"
+        )
+    if missing_topics:
+        reasons.append(f"missing required topics: {missing_topics}")
+
+    return {
+        "name": str(profile.get("profile_name", Path(profile_path).stem)),
+        "path": str(profile_path),
+        "compatible": not reasons,
+        "required_arms": required_arms,
+        "missing_topics": missing_topics,
+        "reasons": reasons,
+    }
 
 
 def run_command(
