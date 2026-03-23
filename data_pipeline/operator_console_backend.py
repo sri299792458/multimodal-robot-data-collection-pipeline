@@ -150,6 +150,7 @@ class OperatorConsoleBackend:
         return "idle"
 
     def snapshot(self, config: dict[str, Any]) -> dict[str, Any]:
+        preview_capture_plan, preview_capture_plan_error = self._preview_session_capture_plan(config)
         return {
             "session_state": self.session_state(config),
             "validation_state": self.validation_state(config),
@@ -175,6 +176,8 @@ class OperatorConsoleBackend:
             "latest_recording_check_output": self.latest_recording_check_output,
             "recording_check_running": self.recording_check_running,
             "current_session_capture_plan": self.current_session_capture_plan,
+            "preview_session_capture_plan": preview_capture_plan,
+            "preview_session_capture_plan_error": preview_capture_plan_error,
         }
 
     def validation_state(self, config: dict[str, Any]) -> str:
@@ -1187,3 +1190,9 @@ class OperatorConsoleBackend:
         self.current_session_capture_plan = plan
         self.current_session_capture_plan_path = plan_path
         self._persist_session_log()
+
+    def _preview_session_capture_plan(self, config: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+        try:
+            return build_session_capture_plan(config, session_id=self.session_id), ""
+        except Exception as exc:
+            return None, str(exc)

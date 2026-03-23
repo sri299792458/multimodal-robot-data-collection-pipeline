@@ -1898,3 +1898,23 @@
   - real `profile_compatibility` against all known published profiles, not just the auto profile for the current active arms
 - Added profile-compatibility helpers in [pipeline_utils.py](/home/srinivas/Desktop/pipeline/data_pipeline/pipeline_utils.py) so the capture-plan layer can answer which shared published schemas the current session can satisfy before any UI rewrite.
 - This is the backend/model cutoff point before UI work: the session plan is now a real control surface, not just a snapshot artifact.
+
+### First session-plan UI slice
+
+- Updated [operator_console_qt.py](/home/srinivas/Desktop/pipeline/data_pipeline/operator_console_qt.py) so the operator console now shows the resolved session plan explicitly instead of hiding it behind the old form fields.
+- Added a new `Session Plan` panel that renders:
+  - whether the user is looking at an active-session plan or a form preview
+  - the default published profile
+  - selected topic count and extra-topic count
+  - publishable and blocked published profiles
+  - applied local overlay paths
+  - resolved devices and selected topics
+- Updated [operator_console_backend.py](/home/srinivas/Desktop/pipeline/data_pipeline/operator_console_backend.py) so `snapshot(...)` now also returns:
+  - `preview_session_capture_plan`
+  - `preview_session_capture_plan_error`
+- Brought the current form closer to the real config surface by exposing:
+  - `Enable RealSense`
+  - `Record Left GelSight`
+  - `Record Right GelSight`
+  - both left and right GelSight device paths
+- This is still not the final discovery/role-assignment UI. It is the first honest UI slice: the operator can now see what the current form resolves to before starting a session, and the form no longer hides the left/right GelSight or RealSense enable semantics.

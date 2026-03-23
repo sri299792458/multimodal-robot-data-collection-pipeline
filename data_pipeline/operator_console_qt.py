@@ -210,6 +210,7 @@ class OperatorConsoleQtWindow(QMainWindow):
 
         layout.addWidget(self._build_task_box())
         layout.addWidget(self._build_sensor_box())
+        layout.addWidget(self._build_session_plan_box())
         layout.addWidget(self._build_session_actions_box())
         layout.addWidget(self._build_optional_box())
         layout.addWidget(self._build_artifacts_box())
@@ -250,30 +251,85 @@ class OperatorConsoleQtWindow(QMainWindow):
         return box
 
     def _build_sensor_box(self) -> QWidget:
-        box = QGroupBox("Sensor Inputs")
+        box = QGroupBox("Session Inputs")
         form = QFormLayout(box)
         form.setSpacing(10)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.form_widgets["sensors_file"] = QLineEdit("data_pipeline/configs/sensors.local.yaml")
+        self.form_widgets["realsense_enabled"] = QCheckBox("Enable RealSense")
+        self.form_widgets["realsense_enabled"].setChecked(True)
         self.form_widgets["wrist_serial_no"] = QLineEdit()
         self.form_widgets["scene_serial_no"] = QLineEdit()
+        self.form_widgets["gelsight_enable_left"] = QCheckBox("Record Left GelSight")
+        self.form_widgets["gelsight_enable_right"] = QCheckBox("Record Right GelSight")
         self.form_widgets["gelsight_left_device_path"] = QLineEdit()
+        self.form_widgets["gelsight_right_device_path"] = QLineEdit()
         self.form_widgets["viewer_base_url"] = QLineEdit("http://10.33.55.65:3000")
 
         for label, key in [
             ("Sensors File", "sensors_file"),
-            ("Wrist Serial", "wrist_serial_no"),
-            ("Scene Serial", "scene_serial_no"),
+            ("Wrist Camera Serial", "wrist_serial_no"),
+            ("Scene Camera Serial", "scene_serial_no"),
             ("GelSight Left Path", "gelsight_left_device_path"),
+            ("GelSight Right Path", "gelsight_right_device_path"),
             ("Viewer Base URL", "viewer_base_url"),
         ]:
             form.addRow(label, self.form_widgets[key])
 
-        gelsight_checkbox = QCheckBox("Enable GelSight")
-        self.form_widgets["gelsight_enabled"] = gelsight_checkbox
-        form.addRow("", gelsight_checkbox)
+        form.addRow("", self.form_widgets["realsense_enabled"])
+        form.addRow("", self.form_widgets["gelsight_enable_left"])
+        form.addRow("", self.form_widgets["gelsight_enable_right"])
+        return box
+
+    def _build_session_plan_box(self) -> QWidget:
+        box = QGroupBox("Session Plan")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        summary = QFormLayout()
+        summary.setSpacing(8)
+        summary.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        summary.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self.session_plan_source_label = QLabel("")
+        self.session_plan_source_label.setWordWrap(True)
+        self.session_plan_profile_label = QLabel("")
+        self.session_plan_profile_label.setWordWrap(True)
+        self.session_plan_topics_label = QLabel("")
+        self.session_plan_topics_label.setWordWrap(True)
+        self.session_plan_publishable_label = QLabel("")
+        self.session_plan_publishable_label.setWordWrap(True)
+        self.session_plan_incompatible_label = QLabel("")
+        self.session_plan_incompatible_label.setWordWrap(True)
+        self.session_plan_overlays_label = QLabel("")
+        self.session_plan_overlays_label.setWordWrap(True)
+
+        summary.addRow("Source", self.session_plan_source_label)
+        summary.addRow("Default Profile", self.session_plan_profile_label)
+        summary.addRow("Selected Topics", self.session_plan_topics_label)
+        summary.addRow("Publishable", self.session_plan_publishable_label)
+        summary.addRow("Blocked Profiles", self.session_plan_incompatible_label)
+        summary.addRow("Overlays", self.session_plan_overlays_label)
+        layout.addLayout(summary)
+
+        devices_label = QLabel("Devices")
+        devices_label.setObjectName("selectedProcessLabel")
+        layout.addWidget(devices_label)
+        self.session_plan_devices_text = QPlainTextEdit()
+        self.session_plan_devices_text.setReadOnly(True)
+        self.session_plan_devices_text.setMaximumHeight(120)
+        layout.addWidget(self.session_plan_devices_text)
+
+        topics_label = QLabel("Resolved Topics")
+        topics_label.setObjectName("selectedProcessLabel")
+        layout.addWidget(topics_label)
+        self.session_plan_topics_text = QPlainTextEdit()
+        self.session_plan_topics_text.setReadOnly(True)
+        self.session_plan_topics_text.setMaximumHeight(120)
+        layout.addWidget(self.session_plan_topics_text)
         return box
 
     def _build_optional_box(self) -> QWidget:
@@ -466,10 +522,13 @@ class OperatorConsoleQtWindow(QMainWindow):
             self._set_field("operator", str(preset.get("operator", "")))
         self._set_field("active_arms", str(preset.get("active_arms", "lightning")))
         self._set_field("sensors_file", str(preset.get("sensors_file", "data_pipeline/configs/sensors.local.yaml")))
+        self._set_field("realsense_enabled", bool(preset.get("realsense", {}).get("enabled", True)))
         self._set_field("wrist_serial_no", str(preset.get("realsense", {}).get("wrist_serial_no", "")))
         self._set_field("scene_serial_no", str(preset.get("realsense", {}).get("scene_serial_no", "")))
-        self._set_field("gelsight_enabled", bool(preset.get("gelsight", {}).get("enabled", False)))
+        self._set_field("gelsight_enable_left", bool(preset.get("gelsight", {}).get("enable_left", False)))
+        self._set_field("gelsight_enable_right", bool(preset.get("gelsight", {}).get("enable_right", False)))
         self._set_field("gelsight_left_device_path", str(preset.get("gelsight", {}).get("left_device_path", "")))
+        self._set_field("gelsight_right_device_path", str(preset.get("gelsight", {}).get("right_device_path", "")))
         self._set_field("viewer_base_url", str(preset.get("viewer_base_url", "")))
         self._set_field("notes", "")
         self._set_field("extra_topics", "")
@@ -498,6 +557,9 @@ class OperatorConsoleQtWindow(QMainWindow):
         raise TypeError(f"Unsupported widget type for {key}")
 
     def _config(self) -> dict[str, object]:
+        realsense_enabled = bool(self._get_field("realsense_enabled"))
+        gelsight_enable_left = bool(self._get_field("gelsight_enable_left"))
+        gelsight_enable_right = bool(self._get_field("gelsight_enable_right"))
         return {
             "preset_id": self.preset_combo.currentText().strip(),
             "dataset_id": self._get_field("dataset_id"),
@@ -509,12 +571,12 @@ class OperatorConsoleQtWindow(QMainWindow):
             "sensors_file": self._get_field("sensors_file"),
             "wrist_serial_no": self._get_field("wrist_serial_no"),
             "scene_serial_no": self._get_field("scene_serial_no"),
-            "realsense_enabled": True,
-            "gelsight_enabled": bool(self._get_field("gelsight_enabled")),
-            "gelsight_enable_left": bool(self._get_field("gelsight_enabled")),
-            "gelsight_enable_right": False,
+            "realsense_enabled": realsense_enabled,
+            "gelsight_enabled": gelsight_enable_left or gelsight_enable_right,
+            "gelsight_enable_left": gelsight_enable_left,
+            "gelsight_enable_right": gelsight_enable_right,
             "gelsight_left_device_path": self._get_field("gelsight_left_device_path"),
-            "gelsight_right_device_path": "",
+            "gelsight_right_device_path": self._get_field("gelsight_right_device_path"),
             "viewer_base_url": self._get_field("viewer_base_url"),
             "notes": self._get_field("notes"),
             "extra_topics": self._get_field("extra_topics"),
@@ -563,10 +625,77 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.latest_episode_label.setText(snapshot.get("latest_episode_id") or "")
         self.latest_dataset_label.setText(snapshot.get("latest_dataset_id") or "")
         self.latest_viewer_label.setText(snapshot.get("latest_viewer_url") or "")
+        self._render_session_plan(snapshot)
         self._render_health(snapshot.get("health", {}))
         self._render_logs(snapshot)
         self._render_output(snapshot)
         self._update_button_states(snapshot)
+
+    def _render_session_plan(self, snapshot: dict[str, object]) -> None:
+        active_plan = snapshot.get("current_session_capture_plan")
+        preview_plan = snapshot.get("preview_session_capture_plan")
+        preview_error = str(snapshot.get("preview_session_capture_plan_error") or "").strip()
+
+        source_text = "Active Session" if active_plan else "Form Preview"
+        plan = active_plan if isinstance(active_plan, dict) else preview_plan if isinstance(preview_plan, dict) else None
+
+        if plan is None:
+            self.session_plan_source_label.setText("Preview unavailable")
+            self.session_plan_profile_label.setText("")
+            self.session_plan_topics_label.setText("")
+            self.session_plan_publishable_label.setText("")
+            self.session_plan_incompatible_label.setText(preview_error or "")
+            self.session_plan_overlays_label.setText("")
+            self.session_plan_devices_text.setPlainText("")
+            self.session_plan_topics_text.setPlainText("")
+            return
+
+        self.session_plan_source_label.setText(source_text)
+        default_profile = plan.get("default_published_profile", {})
+        self.session_plan_profile_label.setText(str(default_profile.get("name", "")))
+
+        selected_topics = [str(topic) for topic in plan.get("selected_topics", []) if str(topic).strip()]
+        selected_extra_topics = [str(topic) for topic in plan.get("selected_extra_topics", []) if str(topic).strip()]
+        topic_summary = f"{len(selected_topics)} topics"
+        if selected_extra_topics:
+            topic_summary += f" ({len(selected_extra_topics)} extra)"
+        self.session_plan_topics_label.setText(topic_summary)
+
+        compatibility = plan.get("profile_compatibility", {})
+        publishable = compatibility.get("publishable_profiles", [])
+        incompatible = compatibility.get("incompatible_profiles", [])
+        publishable_names = ", ".join(entry.get("name", "") for entry in publishable if entry.get("name")) or "None"
+        self.session_plan_publishable_label.setText(publishable_names)
+
+        incompatible_text = "None"
+        if incompatible:
+            incompatible_lines = []
+            for entry in incompatible[:3]:
+                name = str(entry.get("name", "")).strip()
+                reasons = "; ".join(str(reason) for reason in entry.get("reasons", []) if str(reason).strip())
+                incompatible_lines.append(f"{name}: {reasons}" if reasons else name)
+            if len(incompatible) > 3:
+                incompatible_lines.append(f"+{len(incompatible) - 3} more")
+            incompatible_text = "\n".join(incompatible_lines)
+        self.session_plan_incompatible_label.setText(incompatible_text)
+
+        overlays = plan.get("local_overlays", [])
+        overlay_text = ", ".join(str(entry.get("path", "")) for entry in overlays if str(entry.get("path", "")).strip()) or "None"
+        self.session_plan_overlays_label.setText(overlay_text)
+
+        devices = plan.get("discovered_devices") or plan.get("resolved_devices") or []
+        device_lines = []
+        for device in devices:
+            kind = str(device.get("kind", "device")).strip()
+            model = str(device.get("model", "")).strip()
+            serial = str(device.get("serial_number", "")).strip()
+            role = str(device.get("resolved_role", "")).strip()
+            enabled = "enabled" if bool(device.get("enabled", False)) else "disabled"
+            left = " ".join(part for part in [kind, model, serial] if part)
+            right = " | ".join(part for part in [enabled, role] if part)
+            device_lines.append(f"{left} -> {right}".strip())
+        self.session_plan_devices_text.setPlainText("\n".join(device_lines) if device_lines else "No devices resolved.")
+        self.session_plan_topics_text.setPlainText("\n".join(selected_topics))
 
     def _render_health(self, health: dict[str, dict[str, object]]) -> None:
         for name, card in self.health_cards.items():
@@ -602,6 +731,8 @@ class OperatorConsoleQtWindow(QMainWindow):
             f"Validation state: {snapshot.get('validation_state', 'not_run')}",
             "",
         ]
+        if snapshot.get("preview_session_capture_plan_error"):
+            lines.extend(["Session plan preview error:", str(snapshot["preview_session_capture_plan_error"]), ""])
         if snapshot.get("last_action_error"):
             lines.extend(["Last error:", str(snapshot["last_action_error"]), ""])
         if snapshot.get("last_validation_output"):
@@ -619,6 +750,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         scrollbar.setValue(scrollbar.maximum())
 
     def _update_button_states(self, snapshot: dict[str, object]) -> None:
+        current_config = self._config()
         session_state = str(snapshot.get("session_state", "idle"))
         validation_state = str(snapshot.get("validation_state", "not_run"))
         processes = snapshot.get("processes", {})
@@ -626,7 +758,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         converter_state = str(processes.get("converter", {}).get("state", "stopped"))
         recording_ready = bool(snapshot.get("latest_episode_id")) and snapshot.get("latest_recording_ok") is True
         recording_check_running = bool(snapshot.get("recording_check_running"))
-        viewer_available = self.backend.viewer_target_available(self._config())
+        viewer_available = self.backend.viewer_target_available(current_config)
         live_states = {"running", "starting", "stopping"}
         core_running = any(
             str(processes.get(name, {}).get("state", "stopped")) in live_states
@@ -648,7 +780,11 @@ class OperatorConsoleQtWindow(QMainWindow):
             start_enabled = state not in {"running", "starting", "stopping"}
             stop_enabled = state in {"running", "starting", "failed"}
 
-            if name == "gelsight_contract" and not bool(self._get_field("gelsight_enabled")):
+            if name == "realsense_contract" and not bool(current_config["realsense_enabled"]):
+                start_enabled = False
+                stop_enabled = False
+
+            if name == "gelsight_contract" and not bool(current_config["gelsight_enabled"]):
                 start_enabled = False
                 stop_enabled = False
 

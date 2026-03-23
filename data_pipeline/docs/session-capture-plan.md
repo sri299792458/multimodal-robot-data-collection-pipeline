@@ -407,3 +407,32 @@ But it completes the important backend separation:
 
 - the session plan now chooses what raw topics are recorded
 - published profiles now act as compatibility/schema checks instead of being the sole thing that determines the raw topic set
+
+## First UI Slice
+
+The first UI slice does not attempt full runtime discovery yet.
+
+Instead, it makes the current session-plan layer visible and honest in the operator console:
+
+- the console now shows a `Session Plan` panel
+- the panel renders either:
+  - the active session plan, if a session has already been started
+  - or a live form preview of the session plan derived from the current inputs
+- the panel exposes:
+  - default published profile
+  - selected topic count
+  - publishable and blocked published profiles
+  - applied local overlays
+  - resolved devices
+  - selected topics
+
+The same slice also brings the current form closer to the real backend config by exposing:
+
+- `Enable RealSense`
+- `Record Left GelSight`
+- `Record Right GelSight`
+- both left and right GelSight device paths
+
+This is still transitional because the operator is not yet editing a true discovered-device table.
+
+But it removes the previous opacity: the form is no longer just a bag of serial fields, and the operator can now see what session plan the backend will actually use before starting the session.
