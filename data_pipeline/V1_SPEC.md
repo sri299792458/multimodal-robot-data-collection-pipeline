@@ -328,13 +328,13 @@ Recommended `observation.state` contents:
 
 - joint positions
 - end-effector pose
-- gripper position
+- gripper position normalized to `0..1` with `0=open`, `1=closed`
 - force-torque values
 
 Recommended `action` contents:
 
 - teleop/runtime command sent to the robot
-- commanded gripper value
+- commanded gripper value on the same `0..1` scale with `0=open`, `1=closed`
 
 
 ## 16. Raw-Only vs Published

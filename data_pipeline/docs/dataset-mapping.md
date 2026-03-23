@@ -174,6 +174,12 @@ The current bimanual `multisensor_20hz` profile uses this flat `observation.stat
 
 This keeps all robot-side low-dimensional state in one compact feature, which is the easiest shape for LeRobot-style datasets and policy code. It also avoids prematurely creating many custom low-dimensional namespaces.
 
+For both arms:
+
+- `*_gripper_position` is normalized measured opening on `0..1`
+- `0.0 = fully open`
+- `1.0 = fully closed`
+
 
 ## Action Definition
 
@@ -202,6 +208,12 @@ The current bimanual `multisensor_20hz` profile uses this flat `action` order:
 ### Why
 
 The V1 action is the command sent by the teleoperation/runtime stack. This is more stable and more semantically honest than silently replacing action with a derived delta later in the pipeline.
+
+For both arms:
+
+- `*_cmd_gripper` is commanded gripper opening on `0..1`
+- `0.0 = fully open`
+- `1.0 = fully closed`
 
 For the single-arm profiles, use the corresponding per-arm slice only.
 

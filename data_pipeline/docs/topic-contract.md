@@ -84,8 +84,15 @@ There is no standard stamped scalar message in core ROS 2. Reusing `JointState` 
 
 Suggested convention:
 
-- state: `name = ["gripper"]`, `position = [measured_position]`
-- command: `name = ["gripper_cmd"]`, `position = [commanded_position]`
+- state: `name = ["gripper"]`, `position = [measured_open_amount]`
+- command: `name = ["gripper_cmd"]`, `position = [commanded_open_amount]`
+
+For V1, both stable gripper topics use the same semantic scale:
+
+- `0.0 = fully open`
+- `1.0 = fully closed`
+
+For measured state, normalize from the Robotiq driver's calibrated open/closed range when available.
 
 ### Why wrench uses `geometry_msgs/msg/WrenchStamped`
 
@@ -106,7 +113,7 @@ The existing runtime currently publishes or can be made to publish the following
 | `/lightning_cartesian_eef` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | `/spark/lightning/robot/eef_pose` |
 | `/lightning_ft` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | `/spark/lightning/robot/tcp_wrench` |
 | `/lightning_raw_ft_raw` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | optional raw debug topic |
-| `/lightning_gripper` | `std_msgs/msg/Int32` | exists in current hardware-tuned runtime, unstamped | `/spark/lightning/robot/gripper_state` |
+| `/lightning_gripper` | `std_msgs/msg/Int32` | exists in current hardware-tuned runtime, unstamped raw Robotiq position | source for normalized `/spark/lightning/robot/gripper_state` |
 | `/lightning_enable` | `std_msgs/msg/Bool` | exists in `main`, unstamped | optional raw debug topic |
 | `/lightning_safety_mode` | `std_msgs/msg/Int32` | exists in `main`, unstamped | optional raw debug topic |
 | `/lightning_force_offset` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | optional raw debug topic |
@@ -117,7 +124,7 @@ The existing runtime currently publishes or can be made to publish the following
 | `/thunder_cartesian_eef` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | `/spark/thunder/robot/eef_pose` |
 | `/thunder_ft` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | `/spark/thunder/robot/tcp_wrench` |
 | `/thunder_raw_ft_raw` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | optional raw debug topic |
-| `/thunder_gripper` | `std_msgs/msg/Int32` | exists in current hardware-tuned runtime, unstamped | `/spark/thunder/robot/gripper_state` |
+| `/thunder_gripper` | `std_msgs/msg/Int32` | exists in current hardware-tuned runtime, unstamped raw Robotiq position | source for normalized `/spark/thunder/robot/gripper_state` |
 | `/thunder_enable` | `std_msgs/msg/Bool` | exists in `main`, unstamped | optional raw debug topic |
 | `/thunder_safety_mode` | `std_msgs/msg/Int32` | exists in `main`, unstamped | optional raw debug topic |
 | `/thunder_force_offset` | `std_msgs/msg/Float32MultiArray` | exists in `main`, unstamped | optional raw debug topic |

@@ -126,6 +126,18 @@ def _spark_gripper_command(arm: str, wrist_angle: float) -> float:
     return round(float(gripper) * 10) / 10
 
 
+def _normalized_measured_gripper_position(gripper) -> float:
+    raw_pos = float(gripper.get_current_position())
+    open_pos = float(gripper.get_open_position())
+    closed_pos = float(gripper.get_closed_position())
+    if closed_pos <= open_pos:
+        # The Robotiq driver normally auto-calibrates on activation. If that
+        # range is unavailable, fall back to the controller's native full scale.
+        return float(np.clip(raw_pos / 255.0, 0.0, 1.0))
+    normalized = (raw_pos - open_pos) / (closed_pos - open_pos)
+    return float(np.clip(normalized, 0.0, 1.0))
+
+
 def process_spark_mode(
     *,
     arm: str,
@@ -236,8 +248,9 @@ def publish_periodic_robot_state(*, arm: str, runtime_state: TeleopRuntimeState,
 
     gripper = 0.0
     if URs.gripper_enabled(arm):
-        gripper = float(URs.get_gripper(arm).get_current_position())
-        pubs[arm + "_gripper"].publish(Int32(data=int(gripper)))
+        raw_gripper = int(URs.get_gripper(arm).get_current_position())
+        pubs[arm + "_gripper"].publish(Int32(data=raw_gripper))
+        gripper = _normalized_measured_gripper_position(URs.get_gripper(arm))
 
     enable = runtime_state.spark_enable[arm] if arm in runtime_state.spark_enable else False
     pubs[arm + "_enable"].publish(Bool(data=enable))

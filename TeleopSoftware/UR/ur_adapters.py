@@ -163,5 +163,11 @@ class URGripperAdapter:
     def get_current_position(self):
         return self._gripper.get_current_position()
 
+    def get_open_position(self):
+        return self._gripper.get_open_position()
+
+    def get_closed_position(self):
+        return self._gripper.get_closed_position()
+
     def disconnect(self) -> None:
         self._gripper.disconnect()

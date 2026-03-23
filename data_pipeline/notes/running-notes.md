@@ -1802,3 +1802,18 @@
 - Validation:
   - `python3 -m py_compile TeleopSoftware/teleop_device_launcher.py TeleopSoftware/launch_devs.py`
   - `source /opt/ros/jazzy/setup.bash && .venv/bin/python TeleopSoftware/launch_devs.py --help`
+
+### Normalize stable gripper state to `0..1`
+
+- Updated [teleop_runtime_core.py](/home/srinivas/Desktop/pipeline/TeleopSoftware/teleop_runtime_core.py) so the stable published gripper state topic:
+  - `/spark/{arm}/robot/gripper_state`
+  - now uses calibrated normalized opening instead of the raw Robotiq `POS` register
+- Semantic contract is now:
+  - `0.0 = fully open`
+  - `1.0 = fully closed`
+- Raw legacy/debug topic remains unchanged:
+  - `/{arm}_gripper` still publishes the hardware-native integer position
+- Normalization uses the Robotiq driver's calibrated open/closed endpoints established during activation:
+  - [get_open_position()](/home/srinivas/Desktop/pipeline/TeleopSoftware/UR/gripper.py#L204)
+  - [get_closed_position()](/home/srinivas/Desktop/pipeline/TeleopSoftware/UR/gripper.py#L208)
+- Updated the topic and dataset contract docs so published gripper state and command are explicitly on the same `0..1` scale.
