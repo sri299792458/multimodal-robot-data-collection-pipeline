@@ -1864,6 +1864,6 @@
   - canonical role names must stay lab-stable and shared
   - raw session bring-up should be device-centric and role-based
   - published profile YAMLs should remain fixed conversion schemas, not the thing that defines the whole live session
-  - optional local YAMLs may provide serial-to-role defaults and optional geometry-file references
+  - optional local YAMLs may provide serial-to-role defaults, launch defaults, calibration refs, UI defaults, optional geometry, and other local rig facts
   - operator confirmation should happen once per session, not once per episode
 - This is a design/spec pass only. No runtime behavior was changed yet.

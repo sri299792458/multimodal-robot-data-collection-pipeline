@@ -102,8 +102,13 @@ It may provide:
 
 - serial-to-role defaults
 - display labels
+- enabled-by-default flags
+- launch defaults
+- viewer/UI defaults
 - mount metadata
-- optional geometry file references
+- calibration references
+- optional geometry data or geometry file references
+- other rig-specific facts that do not redefine shared semantics
 
 It must not redefine shared semantics.
 
@@ -202,8 +207,7 @@ session_id: session-20260323-101500
 contract_version: v1
 
 local_overlays:
-  - path: data_pipeline/configs/sensors.local.yaml
-  - path: data_pipeline/configs/rig_geometry.local.yaml
+  - path: data_pipeline/configs/session.local.yaml
 
 discovered_devices:
   - device_id: realsense/130322273305
@@ -261,7 +265,8 @@ profile_compatibility:
 
 ## Optional Local YAML Overlay Shape
 
-The minimal local overlay should support remembered serial-to-role defaults.
+The local overlay should be broad enough to hold local defaults and rig-specific facts,
+while staying out of shared semantics.
 
 Example:
 
@@ -271,28 +276,43 @@ schema_version: 1
 devices:
   realsense/130322273305:
     role: lightning_wrist_0
+    enabled_by_default: true
     display_label: Lightning wrist D405
+    launch:
+      color_profile: 640,480,30
+      depth_profile: 640,480,30
+    metadata:
+      calibration_ref: calib://realsense/lightning_wrist_0/v2
   realsense/213622251272:
     role: scene_0
+    enabled_by_default: true
     display_label: Primary overhead D455
   realsense/f1380660:
     role: scene_1
+    enabled_by_default: false
     display_label: Side L515
   gelsight/28D8PXEC:
     role: lightning_finger_left
     display_label: Lightning left GelSight
+    metadata:
+      gel_type: marker
+      calibration_ref: calib://gelsight/lightning_finger_left/v1
+
+ui:
+  viewer_base_url: http://10.33.55.65:3000
 ```
 
-If geometry is needed, the same local YAML may also attach a separate geometry file reference:
+If geometry is needed, the same local YAML may also embed a transform directly or attach a separate geometry file reference:
 
 ```yaml
 devices:
   realsense/213622251272:
     role: scene_0
-    geometry_file: data_pipeline/calibration/scene_0.yaml
+    geometry:
+      file: data_pipeline/calibration/scene_0.yaml
 ```
 
-This keeps geometry optional without requiring every session to care about it.
+This keeps geometry optional without making geometry the only reason the overlay exists.
 
 
 ## Episode Manifest Rule
@@ -346,7 +366,7 @@ The next implementation steps should be:
 1. keep the shared topic/timestamp contract
 2. stop treating the current `multisensor_20hz*.yaml` files as session-definition files
 3. introduce an explicit session capture-plan object in the operator console/backend
-4. let optional local YAML overlays provide serial-to-role defaults
+4. let optional local YAML overlays provide serial-to-role defaults and other local rig/session defaults
 5. keep published profiles for conversion-time schema checks
 
 This is the smallest architecture change that removes the current rigidity without throwing away the existing V1 pipeline rules.
