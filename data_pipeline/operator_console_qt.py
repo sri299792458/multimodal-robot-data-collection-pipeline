@@ -20,7 +20,6 @@ try:
         QFrame,
         QGridLayout,
         QGroupBox,
-        QHeaderView,
         QHBoxLayout,
         QLabel,
         QLineEdit,
@@ -206,7 +205,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 0)
         splitter.setStretchFactor(2, 1)
-        splitter.setSizes([480, 560, 760])
+        splitter.setSizes([560, 520, 720])
 
     def _make_scroll_area(self, widget: QWidget) -> QScrollArea:
         scroll = QScrollArea()
@@ -304,17 +303,11 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.session_devices_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.session_devices_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.session_devices_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        header = self.session_devices_table.horizontalHeader()
-        header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.session_devices_table.setColumnWidth(0, 68)
+        self.session_devices_table.horizontalHeader().setStretchLastSection(True)
+        self.session_devices_table.setColumnWidth(0, 64)
         self.session_devices_table.setColumnWidth(1, 92)
-        self.session_devices_table.setColumnWidth(2, 110)
-        self.session_devices_table.setColumnWidth(4, 150)
+        self.session_devices_table.setColumnWidth(2, 118)
+        self.session_devices_table.setColumnWidth(3, 200)
         layout.addWidget(self.session_devices_table)
 
         controls = QHBoxLayout()
