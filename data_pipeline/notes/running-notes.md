@@ -2002,3 +2002,21 @@
 - Updated the operator-console backend, discovery layer, session-plan layer, manifest helpers, and dummy-episode generator to use canonical V2 sensor roles.
 - Removed the old Tk operator console from the active `data_pipeline/` surface by archiving it under [data_pipeline/archive/operator_console_tk_v1.py](/home/srinivas/Desktop/pipeline/data_pipeline/archive/operator_console_tk_v1.py).
 - Updated the active README and bring-up/runbook docs so they no longer advertise the V1 launch arguments or topic names as live guidance.
+
+### Session/UI spec reset
+
+- Rewrote [session-capture-plan.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/session-capture-plan.md) from the ground up around three separate concepts:
+  - discovered devices
+  - expected devices from preset/overlay
+  - resolved session selection
+- Locked the session-plan model to the rule that discovery is the source of truth for live hardware.
+- Made the spec explicit that presets and local overlays may contribute defaults and expectations, but must not fabricate live session devices.
+- Rewrote [operator-console-spec.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/operator-console-spec.md) to match that model.
+- The UI spec now explicitly requires:
+  - discovered-device rows only in the main table
+  - a separate `Expected but Missing` section
+  - read-only device identity in the main table
+  - kind-filtered role choices
+  - no add/remove device-row behavior in the primary workflow
+  - no `manual` device-source concept
+- This was necessary because the UI implementation had gotten ahead of the clarified session-plan model and was starting to behave like a device authoring tool instead of a discovery-and-confirmation tool.

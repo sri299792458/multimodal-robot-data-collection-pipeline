@@ -1,65 +1,27 @@
-# Operator Console V1 Spec
+# Operator Console V2 Spec
 
-## 1. Goal
+## Goal
 
-Build a lab-facing Operator Console for capture bring-up, recording, conversion, and review.
+Build a lab-facing operator console for:
 
-V1 is for:
+- session setup
+- readiness validation
+- raw recording
+- conversion
+- viewer launch
 
-- launching and supervising the existing capture processes
-- checking real readiness before recording
-- collecting required episode metadata
-- starting and stopping raw recording
-- converting the recorded episode to the published LeRobot dataset
-- opening the existing browser visualizer for the converted episode
+without turning the UI into:
 
-V1 is not for:
-
-- replacing the current Teleop GUI
-- changing robot-control behavior
-- embedding policy inference
-- inventing new data contracts
-- hiding the existing command-line tools
+- a robot-control replacement
+- a device authoring tool
+- a second source of truth for the data contract
 
 
-## 2. Problem
+## Scope
 
-The current workflow is operationally correct but too fragile for routine lab use.
+The console is a local desktop workflow wrapper around the existing runtime and data-pipeline commands.
 
-The operator currently has to:
-
-- start SPARK device processes
-- start the Teleop GUI / robot runtime
-- start RealSense publishers
-- start GelSight publishers
-- run recorder dry-run
-- run the real recorder
-- perform the demo in Teleop
-- stop the recorder
-- convert the raw episode
-- open the browser viewer
-
-The observed failure modes are already known:
-
-- a process can start without being healthy
-- a topic can exist with `0` messages
-- camera enumeration can be runtime-specific
-- stale permission/session state can break SPARK access
-- active-arm auto-detection can fail at bring-up time
-- operators currently need to read raw logs and remember ordering
-
-So the required product is not "a prettier launcher." It is an operator console with explicit workflow staging and hard readiness gates.
-
-
-## 3. Boundary
-
-- `TeleopSoftware/` remains the robot-control runtime.
-- `data_pipeline/` remains the owner of capture, metadata, conversion, and review.
-- The Operator Console may launch and supervise the Teleop GUI.
-- The Operator Console must not modify the Teleop GUI code path in V1.
-- The Operator Console must wrap the existing CLIs rather than replacing them first.
-
-Source-of-truth commands in scope:
+It must orchestrate:
 
 - `TeleopSoftware/launch_devs.py`
 - `TeleopSoftware/launch.py`
@@ -68,495 +30,304 @@ Source-of-truth commands in scope:
 - `data_pipeline/record_episode.py`
 - `data_pipeline/convert_episode_bag_to_lerobot.py`
 
-
-## 4. Runtime Base
-
-The console must respect the current runtime split:
-
-- Teleop runtime uses the current Teleop Python environment
-- live RealSense capture uses system ROS Jazzy and `/usr/bin/python3`
-- GelSight and recorder use system ROS Jazzy and `/usr/bin/python3`
-- conversion and LeRobot export use the local `.venv`
-
-The console must not depend on shell aliases like `spark`.
-
-
-## 5. Core Rules
-
-### 5.1 Explicit over implicit
-
-The operator must explicitly choose:
-
-- embodiment: `lightning`, `thunder`, or `lightning,thunder`
-- hardware preset
-- required metadata for the episode
-
-The console must not silently infer embodiment from partial runtime state.
-
-### 5.2 Readiness must be measured
-
-`process started` is not a valid readiness signal.
-
-Readiness must be based on some combination of:
-
-- process alive
-- required topics present
-- required topics receiving messages
-- minimum message-rate checks
-- explicit success signals in logs when needed
-
-### 5.3 Fail closed
-
-The console must block recording when required inputs are unhealthy.
-
 It must not:
 
-- start recording with a red required subsystem
-- silently drop required sensors
-- silently publish incomplete episodes under the wrong profile
-
-### 5.4 Reuse the existing tools first
-
-V1 should orchestrate the existing commands instead of rewriting their logic in the GUI layer.
+- replace Teleop control logic
+- invent new device identities
+- invent new canonical roles
+- invent new raw topic names
 
 
-## 6. V1 Scope
+## Governing Principle
 
-The first validated target is the currently working Lightning-only flow:
+The operator console must follow the session-capture-plan model, not redefine it.
 
-- `lightning`
-- D405 wrist camera
-- D455 or L515 scene camera
-- optional left GelSight
-- raw recording
-- LeRobot conversion
-- browser viewer launch
+See:
 
-Thunder-only and bimanual should be represented in the configuration and state model, but do not need to be the first implementation target.
+- [session-capture-plan.md](./session-capture-plan.md)
+- [topic-contract.md](./topic-contract.md)
+- [../V2_SPEC.md](../V2_SPEC.md)
 
 
-## 7. Non-Goals
+## Core Separation
 
-- Do not replace the current Teleop GUI.
-- Do not add robot-control widgets to the new console.
-- Do not patch Teleop just to make the console usable.
-- Do not merge capture orchestration and robot control into one window.
-- Do not support every possible hardware topology in V1.
-- Do not create a second independent implementation of recording or conversion.
+The UI must keep these concepts separate:
 
+### Live discovered devices
 
-## 8. Architecture
+What hardware is actually present right now.
 
-The Operator Console should have two parts:
+### Expected devices
 
-- a backend supervisor
-- a frontend UI
+What a preset or local overlay says is usually present.
 
-### 8.1 Backend supervisor
+### Resolved session selection
 
-The backend supervisor must:
+Which discovered devices are enabled for this session and what canonical roles they resolve to.
 
-- launch subprocesses
-- track process state
-- collect recent logs
-- probe ROS topics
-- evaluate readiness rules
-- persist per-session state
+### Published profile compatibility
 
-The backend supervisor is the only component allowed to spawn or stop capture-related processes.
+Which published datasets the resolved session could later convert into.
 
-### 8.2 Frontend UI
-
-The frontend must:
-
-- show workflow state
-- show subsystem health
-- collect metadata
-- trigger validate / record / convert / review actions
-- expose logs and exact failure points
-
-V1 implementation decision:
-
-- the production frontend should be `PySide6` / Qt
-- it remains a local Python desktop app
-- it must not become a browser/server application
-
-The backend contract and state model remain more important than presentation details, but the frontend toolkit is no longer open-ended for V1.
-
-The existing Tk implementation is a prototype/reference only until the Qt frontend reaches feature parity.
-
-Qt migration must preserve:
-
-- the same backend supervisor
-- the same named-process model
-- the same readiness gates
-- the same record / convert / review workflow
-- the same failure visibility or better
+The current UI must never collapse these into one editable list of “devices”.
 
 
-## 9. Process Model
+## Workflow
 
-The backend must manage named processes explicitly.
+The intended operator flow is:
 
-Minimum V1 process set:
+1. choose preset and episode metadata
+2. discover live devices
+3. review discovered devices and any missing expected devices
+4. enable or disable discovered devices for this session
+5. confirm or correct canonical role suggestions
+6. start session
+7. validate
+8. record one or more episodes
+9. convert
+10. open viewer
 
-- `spark_devices`
-  - `python TeleopSoftware/launch_devs.py`
-- `teleop_gui`
-  - `python TeleopSoftware/launch.py`
-- `realsense_contract`
-  - `ros2 launch data_pipeline/launch/realsense_contract.launch.py ...`
-- `gelsight_contract`
-  - `ros2 launch data_pipeline/launch/gelsight_contract.launch.py ...`
-- `recorder`
-  - `/usr/bin/python3 data_pipeline/record_episode.py ...`
-- `converter`
-  - `.venv/bin/python data_pipeline/convert_episode_bag_to_lerobot.py ...`
-- `viewer`
-  - Bun process for `lerobot-dataset-visualizer`
-
-Per process, the backend must track:
-
-- command
-- environment block
-- cwd
-- pid
-- start time
-- current state:
-  - `stopped`
-  - `starting`
-  - `running`
-  - `failed`
-  - `stopping`
-- last exit code
-- recent log lines
+The operator should not need to rebuild the rig model every episode.
 
 
-## 10. Configuration Model
+## UI Model
 
-The console should use checked-in presets plus local machine overrides.
+The console should have these sections:
 
-### 10.1 Checked-in presets
+### 1. Preset and metadata
+
+Includes:
+
+- preset
+- dataset id
+- robot id
+- task name
+- language instruction
+- operator
+- active arms
+- sensors file
+- viewer URL
+
+This section is about session defaults and recording metadata, not live device identity.
+
+### 2. Discovered Devices
+
+This is the primary device table.
+
+It must show discovered devices only.
+
+Recommended columns:
+
+- `Record`
+- `Kind`
+- `Model`
+- `Identifier`
+- `Suggested Role`
+- `Resolved Role`
+- `Match`
+
+Required behavior:
+
+- `Kind`, `Model`, and `Identifier` are read-only
+- `Record` is editable
+- `Resolved Role` is editable
+- role choices are filtered by device kind
+
+Forbidden behavior:
+
+- add arbitrary camera rows
+- add arbitrary GelSight rows
+- delete discovered rows
+- type a new device identifier into the main table
+- change device kind in the main table
+
+If the operator does not want a device in this session, they uncheck `Record`.
+
+### 3. Expected but Missing
+
+This section is separate from discovered devices.
+
+It must show devices expected by preset or overlay that are not currently discovered.
 
 Examples:
 
-- `lightning_d405_d455_left_gelsight`
-- `lightning_d405_l515_no_tactile`
-- `bimanual_d405_d455_dual_tactile`
+- expected `lightning_finger_left`, not found
+- expected `scene_2`, not found
 
-Each preset should define:
+These entries must never be launch targets.
 
-- embodiment
-- required services
-- required topics
-- camera serial assignments
-- tactile expectations
-- default `dataset_id`
-- default `robot_id`
-- expected published profile
+### 4. Session Plan
 
-### 10.2 Local overrides
+This section shows the resolved plan:
 
-Local untracked config should define machine-specific values such as:
+- default published profile
+- selected topics
+- publishable profiles
+- blocked profiles
+- overlays used
+- resolved devices
 
-- actual serial numbers
-- device paths
-- default operator name
-- viewer URL
-- local `sensors.local.yaml` path
+This is a read-only explanation pane.
 
-This should follow the same local-override model already used for hardware metadata.
+### 5. Subsystem Health
 
+This section shows:
 
-## 11. Readiness Contract
+- SPARK devices
+- Teleop GUI
+- RealSense
+- GelSight
+- recorder
+- converter
 
-This is the main contract of the console.
+Readiness must be based on measured health, not merely “process started”.
 
-Each subsystem must have a health card with `red`, `yellow`, or `green` status.
+### 6. Action output and logs
 
-### 11.1 SPARK devices
+The operator must always be able to see:
 
-Required checks:
+- exact failure point
+- last validation output
+- last recording check
+- last conversion output
+- recent process logs
 
-- `launch_devs.py` process alive
-- `/Spark_angle/<arm>` publisher count nonzero for required arms
-- `/Spark_enable/<arm>` publisher count nonzero for required arms
 
-The subsystem must stay red if the process exists but the expected topics do not.
+## Source And Match Semantics
 
-### 11.2 Teleop / robot runtime
+If the UI shows where a device assignment came from, it must describe matching, not existence.
 
-Required checks per active arm:
+Acceptable values:
 
-- `/spark/<arm>/robot/joint_state`
-- `/spark/<arm>/robot/eef_pose`
-- `/spark/<arm>/robot/tcp_wrench`
-- `/spark/<arm>/robot/gripper_state`
-- `/spark/<arm>/teleop/cmd_joint_state`
-- `/spark/<arm>/teleop/cmd_gripper_state`
+- `overlay`
+- `preset`
+- `overlay + preset`
+- `unmatched`
 
-Green means:
+Acceptable wording for the row itself:
 
-- each required topic exists
-- each required topic has recent messages
+- `discovered`
 
-### 11.3 RealSense
+Unacceptable wording:
 
-Required checks per enabled camera:
+- `manual`
 
-- RealSense process alive
-- explicit bridge success observed
-- required image topics exist
-- required image topics have nonzero message rate
+Reason:
 
-This must guard against the known failure mode where a scene topic is advertised but records `0` messages.
+`manual` suggests the operator authored a live device into existence, which is not part of the model.
 
-### 11.4 GelSight
 
-Required checks per enabled tactile stream:
+## Role Editing Rules
 
-- process alive
-- topic exists
-- nonzero message rate
+The UI may let the operator correct role assignments, but only within the canonical vocabulary and only within the allowed kind-specific set.
 
-### 11.5 Recorder readiness
+Examples:
 
-The console must disable `Record` until:
+- a `realsense` may become `scene_1` or `lightning_wrist_1`
+- a `gelsight` may become `lightning_finger_left`
+- a `gelsight` may not become `scene_1`
 
-- embodiment is selected
-- required metadata fields are filled
-- all required subsystem cards are green
-- a dry-run has passed for the current selection
+The UI must not permit:
 
+- arbitrary new role strings
+- freeform role typing
 
-## 12. Workflow State Model
 
-The console must model the operator workflow explicitly.
+## Preset Rules
 
-Top-level states:
+Presets are convenience defaults.
 
-- `idle`
-- `bringing_up`
-- `degraded`
-- `ready_for_dry_run`
-- `ready_to_record`
-- `recording`
-- `recorded`
-- `converting`
-- `converted`
-- `review_ready`
+They may define:
 
-Required transitions:
+- metadata defaults
+- expected devices
+- preferred identifiers
+- default enabled roles
+- default dataset and robot ids
 
-- `idle -> bringing_up`
-  - operator starts the session
-- `bringing_up -> ready_for_dry_run`
-  - required services are healthy
-- `ready_for_dry_run -> ready_to_record`
-  - dry-run succeeds
-- `ready_to_record -> recording`
-  - recorder starts successfully
-- `recording -> recorded`
-  - recorder stops cleanly
-- `recorded -> converting`
-  - operator starts conversion
-- `converting -> converted`
-  - converter exits successfully
-- `converted -> review_ready`
-  - published dataset and viewer link are ready
+They must not:
 
-Any state may transition to `degraded` if a required subsystem fails.
+- create live device rows when discovery found nothing
+- override actual discovery results
+- redefine the canonical role vocabulary
 
 
-## 13. Metadata Contract
+## Local Overlay Rules
 
-The V1 console must collect at least:
+Local overlays may provide:
 
-- `dataset_id`
-- `task_name`
-- `language_instruction`
-- `robot_id`
-- `operator`
-- `active_arms`
-- `sensors_file`
+- serial-to-role defaults
+- display labels
+- default enabled flags
+- calibration references
+- geometry references
+- other local rig facts
 
-Optional:
+They are allowed to inform suggestions.
+They are not allowed to fabricate discovered devices.
 
-- notes
-- extra topics
 
-The console may use templates, but the required fields must remain visible and editable.
+## Session Launch Rules
 
+When the operator clicks `Start Session`, the backend must launch only from the resolved session plan:
 
-## 14. Recording Contract
+- selected discovered devices
+- resolved canonical roles
+- current metadata and paths
 
-The console must separate:
+Missing expected devices must not be launched.
 
-- `Validate`
-- `Record`
 
-### 14.1 Validate
+## Validate Rules
 
-`Validate` must run:
+`Validate` must evaluate the resolved session plan, not the preset alone.
 
-- `record_episode.py --dry-run`
+It should check:
 
-using the current metadata, preset, and embodiment.
+- required core processes
+- required topics for enabled discovered devices
+- message flow on those topics
+- profile compatibility state
 
-The UI must show:
+`Validate` should fail clearly if:
 
-- resolved profile
-- selected topic list
-- selected sensor metadata
+- a required discovered device is not healthy
+- a required profile role is missing
+- a selected device does not produce its expected canonical topics
 
-### 14.2 Record
 
-`Record` must:
+## Record Rules
 
-1. start the real recorder
-2. confirm the recorder process is alive
-3. transition the UI to `recording`
-4. tell the operator to perform the demo in the existing Teleop GUI
+`Record` must be available only when:
 
-The console must not auto-toggle Teleop control buttons such as `Run Spark`.
+- the session is up
+- required subsystems are healthy
+- validation has passed for the current resolved session plan
 
+The recorder must use:
 
-## 15. Conversion and Review Contract
+- the resolved selected topics
+- not a fabricated preset list
+- not a hardcoded device list
 
-After recording finishes, the console must support:
 
-- `Convert Episode`
-- `Open Viewer`
+## Non-Goals
 
-Conversion must:
+- no arbitrary device authoring in the main UI
+- no hidden fallback device identities
+- no dual V1/V2 device table behavior
+- no reintroduction of `wrist/scene/left/right` as live UI concepts
 
-- use `.venv`
-- target the just-recorded episode unless the operator selects another one
 
-The UI must show:
+## Immediate Cleanup Required
 
-- converter exit code
-- published dataset path
-- viewer URL
+The active UI should be aligned to this spec with these concrete changes:
 
-If conversion fails, the actual converter error must be shown.
+1. discovered-device table shows discovered devices only
+2. preset-only or overlay-only devices move to `Expected but Missing`
+3. `Kind` and `Identifier` become read-only in the main table
+4. role choices become kind-filtered
+5. remove add/remove device-row behavior from the main workflow
+6. remove `manual` as a device-source concept
 
-
-## 16. Logging and Audit
-
-The console must not become a black box.
-
-For every session, it should persist a simple machine-readable log containing:
-
-- launched commands
-- selected preset
-- selected local overrides
-- start and stop timestamps
-- exit codes
-- validation failures
-- latest episode id
-- latest published dataset path
-
-
-## 17. UX Requirements
-
-V1 should be operational, not decorative.
-
-Recommended layout:
-
-- left column:
-  - preset selection
-  - metadata form
-  - action buttons
-- center column:
-  - subsystem health cards
-- right column:
-  - recent process logs
-
-Each subsystem card should show:
-
-- status color
-- required topics
-- current rates when available
-- last error
-
-The UI should make it possible to debug common failures without immediately dropping to shell.
-
-
-## 18. Safety Rules
-
-The console must never:
-
-- infer embodiment silently
-- silently drop required sensors from a profile
-- start recording when required subsystems are red
-- hide which runtime/interpreter is being used
-- pretend a process is healthy just because it was spawned
-
-The console should also avoid:
-
-- combining robot-control buttons and capture orchestration in one panel
-- automatically restarting failed processes without making that explicit
-
-
-## 19. Acceptance Criteria
-
-V1 is acceptable when all of the following are true:
-
-- an operator can complete the Lightning-only workflow without typing the existing command sequence by hand
-- the console blocks recording when a required topic is missing or has zero throughput
-- the console can show which process or topic is failing
-- the console can launch recording, stop recording, convert the result, and open the viewer
-- the console does not require changes to the current Teleop GUI
-
-
-## 20. Delivery Plan
-
-### Phase 1
-
-Deliver:
-
-- process orchestration
-- readiness cards
-- metadata form
-- dry-run
-- record
-- convert
-- open viewer
-
-Do not rewrite or patch Teleop in this phase.
-
-### Phase 2
-
-Add:
-
-- stronger diagnostics
-- topic-rate history
-- session history
-- preset editor
-
-### Phase 3
-
-Only after Phase 1 is stable, consider:
-
-- richer review history
-- multi-episode collection workflows
-
-
-## 21. Open Questions
-
-- Should Teleop be launched from the console or simply supervised if already running?
-- Should V1 ship with Lightning-only enabled first and keep bimanual behind a feature gate until validated?
-
-
-## 22. Recommendation
-
-Proceed with a separate Phase 1 Operator Console that:
-
-- wraps the existing commands
-- keeps Teleop untouched
-- uses explicit presets and explicit embodiment
-- gates recording on real subsystem health
-- supports record -> convert -> review end to end
-
-That is the highest-leverage path to reduce lab operator error without introducing a second unsafe control plane.
+Until those are done, the current UI should be treated as transitional rather than spec-complete.

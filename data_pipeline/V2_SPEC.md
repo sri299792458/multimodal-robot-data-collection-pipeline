@@ -31,6 +31,10 @@ These files are the authoritative V2 contract:
 - [docs/topic-contract.md](./docs/topic-contract.md)
 - [docs/session-capture-plan.md](./docs/session-capture-plan.md)
 
+The operator-console behavior spec is:
+
+- [docs/operator-console-spec.md](./docs/operator-console-spec.md)
+
 Historical V1 material is archive-only and must not be used to justify new fallback paths.
 
 
