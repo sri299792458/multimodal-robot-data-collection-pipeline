@@ -2040,3 +2040,10 @@
   - `gelsight` can only resolve to finger tactile roles
 - Discovery rediscovery preserves current session enable/role choices where the same discovered device is still present.
 - Updated [session_capture_plan.py](/home/srinivas/Desktop/pipeline/data_pipeline/session_capture_plan.py) so expected and missing devices are carried into the session plan, and active arms are no longer misrepresented as discovered devices.
+
+### Operator console metadata cleanup
+
+- Removed the leftover `Optional` panel from [operator_console_qt.py](/home/srinivas/Desktop/pipeline/data_pipeline/operator_console_qt.py).
+- Kept only a small `Episode Notes` field in the main preset/metadata section.
+- Removed the `Extra Topics` field from the Qt workflow so the V2 UI no longer advertises a manual topic-selection escape hatch.
+- Simplified the session-plan summary in the UI to report the resolved topic count directly rather than mentioning extra-topic counts.

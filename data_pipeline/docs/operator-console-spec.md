@@ -104,11 +104,14 @@ Includes:
 - task name
 - language instruction
 - operator
+- episode notes
 - active arms
 - sensors file
 - viewer URL
 
 This section is about session defaults and recording metadata, not live device identity.
+
+The V2 console must not expose a freeform `extra topics` field in the main workflow.
 
 ### 2. Discovered Devices
 

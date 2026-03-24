@@ -246,7 +246,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         layout.addWidget(self._build_sensor_box())
         layout.addWidget(self._build_session_plan_box())
         layout.addWidget(self._build_session_actions_box())
-        layout.addWidget(self._build_optional_box())
         layout.addWidget(self._build_artifacts_box())
         layout.addStretch(1)
         return container
@@ -269,6 +268,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.form_widgets["task_name"] = QLineEdit()
         self.form_widgets["language_instruction"] = QLineEdit()
         self.form_widgets["operator"] = QLineEdit(os.environ.get("USER", ""))
+        self.form_widgets["notes"] = QLineEdit()
         active_arms = QComboBox()
         active_arms.addItems(["lightning", "thunder", "lightning,thunder"])
         self.form_widgets["active_arms"] = active_arms
@@ -279,6 +279,7 @@ class OperatorConsoleQtWindow(QMainWindow):
             ("Task Name", "task_name"),
             ("Language", "language_instruction"),
             ("Operator", "operator"),
+            ("Episode Notes", "notes"),
             ("Active Arms", "active_arms"),
         ]:
             form.addRow(label, self.form_widgets[key])
@@ -579,19 +580,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         inventory = self.backend.discover_session_inventory(config)
         self._set_session_inventory(inventory, preserve_existing=True)
 
-    def _build_optional_box(self) -> QWidget:
-        box = QGroupBox("Optional")
-        form = QFormLayout(box)
-        form.setSpacing(10)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
-
-        self.form_widgets["notes"] = QLineEdit()
-        self.form_widgets["extra_topics"] = QLineEdit()
-        form.addRow("Notes", self.form_widgets["notes"])
-        form.addRow("Extra Topics", self.form_widgets["extra_topics"])
-        return box
-
     def _build_session_actions_box(self) -> QWidget:
         box = QGroupBox("Session Actions")
         layout = QGridLayout(box)
@@ -771,7 +759,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         self._set_field("sensors_file", str(preset.get("sensors_file", "data_pipeline/configs/sensors.local.yaml")))
         self._set_field("viewer_base_url", str(preset.get("viewer_base_url", "")))
         self._set_field("notes", "")
-        self._set_field("extra_topics", "")
         inventory = self.backend.discover_session_inventory(self._discovery_seed_config(preset))
         self._set_session_inventory(inventory, preserve_existing=False)
 
@@ -825,7 +812,6 @@ class OperatorConsoleQtWindow(QMainWindow):
             "gelsight_enabled": bool(enabled_gelsights),
             "viewer_base_url": self._get_field("viewer_base_url"),
             "notes": self._get_field("notes"),
-            "extra_topics": self._get_field("extra_topics"),
         }
 
     def _start_session(self) -> None:
@@ -901,11 +887,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.session_plan_profile_label.setText(str(default_profile.get("name", "")))
 
         selected_topics = [str(topic) for topic in plan.get("selected_topics", []) if str(topic).strip()]
-        selected_extra_topics = [str(topic) for topic in plan.get("selected_extra_topics", []) if str(topic).strip()]
-        topic_summary = f"{len(selected_topics)} topics"
-        if selected_extra_topics:
-            topic_summary += f" ({len(selected_extra_topics)} extra)"
-        self.session_plan_topics_label.setText(topic_summary)
+        self.session_plan_topics_label.setText(f"{len(selected_topics)} topics")
 
         compatibility = plan.get("profile_compatibility", {})
         publishable = compatibility.get("publishable_profiles", [])
