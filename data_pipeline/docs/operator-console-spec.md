@@ -52,8 +52,6 @@ The operator should not need to rebuild the rig model every episode.
 Includes:
 
 - session profile
-- dataset id
-- robot type
 - task name
 - language instruction
 - operator
@@ -141,6 +139,18 @@ They must:
 - attach to the latest recorded episode only
 - be saved after a take, not before recording starts
 - reset to blank when a new episode becomes current
+
+### 6. Published dataset target
+
+This is a convert-time setting, not session metadata.
+
+It must:
+
+- live in the `Latest Artifacts` area
+- point at one direct child under `published/`
+- be remembered locally across sessions
+- support `Browse` for existing dataset folders
+- support manual entry for a new dataset folder name
 
 
 ## Hidden Mechanics

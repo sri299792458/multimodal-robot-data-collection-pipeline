@@ -91,8 +91,6 @@ It contains:
 
 - `session_id`
 - `active_arms`
-- `dataset_id`
-- `robot_type`
 - `sensors_file`
 - resolved `devices`
 - resolved `selected_topics`
@@ -140,12 +138,10 @@ Example:
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "contract_version": "v2",
   "session_id": "20260323-101500",
   "active_arms": ["lightning"],
-  "dataset_id": "spark_multisensor_lightning_v1",
-  "robot_type": "spark_lightning",
   "sensors_file": "data_pipeline/configs/sensors.local.yaml",
   "devices": [
     {
@@ -184,6 +180,7 @@ Example:
 5. start the session
 6. validate once
 7. record multiple episodes under that same session profile
+8. choose the published dataset target only when converting
 
 If the rig setup changes materially, start a new session.
 
@@ -219,4 +216,4 @@ It must not expose:
 
 The session profile decides what one session records.
 
-It does not redefine the shared contract, and it does not change the canonical V2 topic surface.
+It does not redefine the shared contract, it does not change the canonical V2 topic surface, and it does not choose the published dataset folder up front.

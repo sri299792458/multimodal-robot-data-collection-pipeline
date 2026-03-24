@@ -62,10 +62,8 @@ TOPIC_TYPES = {
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset-id", default="dummy_multisensor_v1")
     parser.add_argument("--task-name", default="dummy_pick_place")
     parser.add_argument("--language-instruction", default="")
-    parser.add_argument("--robot-id", default="spark_bimanual")
     parser.add_argument("--operator", default="codex")
     parser.add_argument("--profile", default=str(DEFAULT_PROFILE_PATH))
     parser.add_argument("--raw-root", default=str(DEFAULT_RAW_EPISODES_DIR))
@@ -232,20 +230,16 @@ def build_manifest(args: argparse.Namespace, profile: dict, episode_id: str, sta
         "manifest_schema_version": MANIFEST_SCHEMA_VERSION,
         "episode": {
             "episode_id": episode_id,
-            "dataset_id": args.dataset_id,
             "task_name": args.task_name,
             "language_instruction": str(args.language_instruction).strip() or args.task_name,
-            "robot_id": args.robot_id,
             "active_arms": active_arms,
             "operator": args.operator,
         },
         "session": {
-            "schema_version": 3,
+            "schema_version": 4,
             "contract_version": "v2",
             "session_id": "dummy-session",
             "active_arms": active_arms,
-            "dataset_id": args.dataset_id,
-            "robot_type": args.robot_id,
             "sensors_file": None,
             "devices": [],
             "selected_topics": topics,

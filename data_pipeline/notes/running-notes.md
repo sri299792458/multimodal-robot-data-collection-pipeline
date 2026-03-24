@@ -2109,3 +2109,14 @@
 - `Open Viewer` now uses one backend-local default instead of exposing viewer hosting as session metadata.
 - The default is `http://localhost:3000` unless overridden with `PIPELINE_VIEWER_BASE_URL`.
 - Session profiles no longer save viewer-host settings.
+
+### Record-time metadata cleanup
+
+- Removed `dataset_id` and `robot_id` from the active session-start workflow.
+- Raw episode manifests now carry task/language/operator metadata, active arms, and the resolved session object, but not publish-time dataset naming.
+- Bumped the raw manifest schema to `7`.
+- The operator console now keeps a local `Publish Target` in `Latest Artifacts` instead of exposing `Dataset ID` and `Robot Type` in session metadata.
+- Conversion always passes `--published-dataset-id` explicitly from that remembered local target.
+- The stable raw-to-published link remains:
+  - raw identity: `episode_id`
+  - publish artifacts: `published/<dataset_id>/meta/spark_conversion/<episode_id>/conversion_summary.json`

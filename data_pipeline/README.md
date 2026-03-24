@@ -124,10 +124,8 @@ Dry-run the topic selection first:
 
 ```bash
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
   --language-instruction "pick up the object and place it in the target area" \
-  --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --active-arms <lightning|thunder|lightning,thunder> \
   --sensors-file data_pipeline/configs/sensors.example.yaml \
@@ -138,10 +136,8 @@ Record one episode:
 
 ```bash
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
   --language-instruction "pick up the object and place it in the target area" \
-  --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --active-arms <lightning|thunder|lightning,thunder> \
   --sensors-file data_pipeline/configs/sensors.example.yaml
@@ -197,6 +193,7 @@ source /opt/ros/jazzy/setup.bash
 source .venv/bin/activate
 python data_pipeline/convert_episode_bag_to_lerobot.py \
   raw_episodes/<episode_id> \
+  --published-dataset-id <published_dataset_folder_name> \
   --published-root published
 ```
 

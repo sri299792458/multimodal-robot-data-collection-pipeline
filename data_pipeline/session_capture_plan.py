@@ -170,12 +170,10 @@ def build_session_capture_plan(config: dict[str, Any], session_id: str) -> dict[
         )
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "contract_version": "v2",
         "session_id": session_id,
         "active_arms": active_arms,
-        "dataset_id": str(config.get("dataset_id", "")).strip(),
-        "robot_type": str(config.get("robot_id", "")).strip(),
         "sensors_file": sensors_file or None,
         "devices": devices,
         "selected_topics": _selected_topics_for_session(profile=profile, devices=devices),

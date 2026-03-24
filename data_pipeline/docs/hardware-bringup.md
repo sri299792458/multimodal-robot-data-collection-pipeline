@@ -9,26 +9,24 @@ Use separate terminals. For ROS-facing processes, prefer system ROS Jazzy and `/
 
 ## Embodiment Decision
 
-Before you record, decide which embodiment this episode belongs to:
+Before you record, decide which arms and sensors this session will use:
 
 - `lightning` only
 - `thunder` only
 - `lightning` + `thunder`
 
-Recommended metadata naming:
+Before you convert, choose the published dataset folder this session should append into.
+
+Recommended published dataset naming:
 
 - Lightning-only:
-  - `dataset_id = spark_multisensor_lightning_v1`
-  - `robot_id = spark_lightning`
+  - `spark_multisensor_lightning_v1`
 - Lightning-only with published tactile:
-  - `dataset_id = spark_multisensor_lightning_tactile_v1`
-  - `robot_id = spark_lightning`
+  - `spark_multisensor_lightning_tactile_v1`
 - Thunder-only:
-  - `dataset_id = spark_multisensor_thunder_v1`
-  - `robot_id = spark_thunder`
+  - `spark_multisensor_thunder_v1`
 - Bimanual:
-  - `dataset_id = spark_multisensor_bimanual_v1`
-  - `robot_id = spark_bimanual`
+  - `spark_multisensor_bimanual_v1`
 
 Why:
 
@@ -243,10 +241,8 @@ Before recording, run the recorder dry-run:
 ```bash
 source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
   --language-instruction "pick up the object and place it in the target area" \
-  --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --active-arms <lightning|thunder|lightning,thunder> \
   --sensors-file data_pipeline/configs/sensors.local.yaml \
@@ -270,10 +266,8 @@ Do one short smoke-test recording before collecting anything longer:
 ```bash
 source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id <dataset_id_for_this_run> \
   --task-name pick_place \
   --language-instruction "pick up the object and place it in the target area" \
-  --robot-id <robot_id_for_this_run> \
   --operator <operator_name> \
   --active-arms <lightning|thunder|lightning,thunder> \
   --sensors-file data_pipeline/configs/sensors.local.yaml

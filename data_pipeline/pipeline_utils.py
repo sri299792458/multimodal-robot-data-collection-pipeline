@@ -35,7 +35,7 @@ TACTILE_ROLE_CHOICES = (
     "thunder_finger_left",
     "thunder_finger_right",
 )
-MANIFEST_SCHEMA_VERSION = 6
+MANIFEST_SCHEMA_VERSION = 7
 PROFILE_NAME_TO_PATH = {
     "multisensor_20hz": CONFIGS_DIR / "multisensor_20hz.yaml",
     "multisensor_20hz_lightning": CONFIGS_DIR / "multisensor_20hz_lightning.yaml",
@@ -865,8 +865,9 @@ def manifest_sensors(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return list(sensors)
 
 
-def manifest_dataset_id(manifest: dict[str, Any]) -> str:
-    return str(manifest_episode(manifest)["dataset_id"])
+def manifest_dataset_id(manifest: dict[str, Any]) -> str | None:
+    value = manifest_episode(manifest).get("dataset_id")
+    return str(value) if value not in {"", None} else None
 
 
 def manifest_episode_id(manifest: dict[str, Any]) -> str:
@@ -886,8 +887,9 @@ def manifest_active_arms(manifest: dict[str, Any]) -> list[str]:
     return list(manifest_episode(manifest).get("active_arms", []))
 
 
-def manifest_robot_id(manifest: dict[str, Any]) -> str:
-    return str(manifest_episode(manifest)["robot_id"])
+def manifest_robot_id(manifest: dict[str, Any]) -> str | None:
+    value = manifest_episode(manifest).get("robot_id")
+    return str(value) if value not in {"", None} else None
 
 
 def manifest_profile_name(manifest: dict[str, Any]) -> str:
@@ -929,23 +931,32 @@ def write_json(path: str | Path, data: dict[str, Any]) -> None:
 def build_notes_template(manifest: dict[str, Any]) -> str:
     episode = manifest_episode(manifest)
     profile = manifest_profile(manifest)
-    lines = [
-        f"# {episode['episode_id']}",
-        "",
-        f"- dataset_id: {episode['dataset_id']}",
-        f"- task_name: {episode['task_name']}",
-        f"- language_instruction: {episode.get('language_instruction') or ''}",
-        f"- robot_id: {episode['robot_id']}",
-        f"- active_arms: {', '.join(episode.get('active_arms', [])) or 'unknown'}",
-        f"- operator: {episode['operator']}",
-        f"- mapping_profile: {profile['name']}",
-        f"- clock_policy: {profile['clock_policy']}",
-        "",
-        "## Notes",
-        "",
-        "- Fill in task-specific notes here.",
-        "- Record any runtime anomalies, dropped sensors, or calibration issues.",
-    ]
+    lines = [f"# {episode['episode_id']}", ""]
+    dataset_id = episode.get("dataset_id")
+    if dataset_id not in {"", None}:
+        lines.append(f"- dataset_id: {dataset_id}")
+    lines.extend(
+        [
+            f"- task_name: {episode['task_name']}",
+            f"- language_instruction: {episode.get('language_instruction') or ''}",
+        ]
+    )
+    robot_id = episode.get("robot_id")
+    if robot_id not in {"", None}:
+        lines.append(f"- robot_id: {robot_id}")
+    lines.extend(
+        [
+            f"- active_arms: {', '.join(episode.get('active_arms', [])) or 'unknown'}",
+            f"- operator: {episode['operator']}",
+            f"- mapping_profile: {profile['name']}",
+            f"- clock_policy: {profile['clock_policy']}",
+            "",
+            "## Notes",
+            "",
+            "- Fill in task-specific notes here.",
+            "- Record any runtime anomalies, dropped sensors, or calibration issues.",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 

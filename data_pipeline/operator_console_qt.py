@@ -155,6 +155,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.last_log_render = ""
         self.last_output_render = ""
         self.notes_target_episode_id = ""
+        self.published_target_last_saved = ""
 
         self.form_widgets: dict[str, QLineEdit | QComboBox | QCheckBox] = {}
         self.health_cards: dict[str, HealthCard] = {}
@@ -251,8 +252,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         profile_layout.addWidget(self.save_profile_button)
         form.addRow("Session Profile", profile_row)
 
-        self.form_widgets["dataset_id"] = QLineEdit()
-        self.form_widgets["robot_id"] = QLineEdit()
         self.form_widgets["task_name"] = QLineEdit()
         self.form_widgets["language_instruction"] = QLineEdit()
         self.form_widgets["operator"] = QLineEdit(os.environ.get("USER", ""))
@@ -261,8 +260,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.form_widgets["active_arms"] = active_arms
 
         for label, key in [
-            ("Dataset ID", "dataset_id"),
-            ("Robot Type", "robot_id"),
             ("Task Name", "task_name"),
             ("Language", "language_instruction"),
             ("Operator", "operator"),
@@ -386,8 +383,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         self._discover_session_devices()
 
     def _apply_form_config(self, config: dict[str, object]) -> None:
-        self._set_field("dataset_id", str(config.get("dataset_id", "")))
-        self._set_field("robot_id", str(config.get("robot_id", "")))
         self._set_field("task_name", str(config.get("task_name", "")))
         self._set_field("language_instruction", str(config.get("language_instruction", "")))
         if "operator" in config:
@@ -547,6 +542,18 @@ class OperatorConsoleQtWindow(QMainWindow):
         artifacts_box = QGroupBox("Latest Artifacts")
         artifacts_layout = QFormLayout(artifacts_box)
         artifacts_layout.setSpacing(8)
+        publish_target_row = QWidget()
+        publish_target_layout = QHBoxLayout(publish_target_row)
+        publish_target_layout.setContentsMargins(0, 0, 0, 0)
+        publish_target_layout.setSpacing(8)
+        self.published_target_edit = QLineEdit()
+        self.published_target_edit.setPlaceholderText("published/<dataset_folder> or dataset folder name")
+        self.published_target_edit.editingFinished.connect(self._save_published_dataset_target)
+        self.browse_published_target_button = QPushButton("Browse")
+        self.browse_published_target_button.clicked.connect(self._browse_published_dataset_target)
+        publish_target_layout.addWidget(self.published_target_edit, 1)
+        publish_target_layout.addWidget(self.browse_published_target_button)
+        artifacts_layout.addRow("Publish Target", publish_target_row)
         self.latest_episode_label = QLabel("")
         self.latest_episode_label.setWordWrap(True)
         self.latest_episode_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -581,6 +588,48 @@ class OperatorConsoleQtWindow(QMainWindow):
         notes_layout.addLayout(notes_row)
         artifacts_layout.addRow("Post-take Notes", notes_container)
         return artifacts_box
+
+    def _browse_published_dataset_target(self) -> None:
+        current = self.published_target_edit.text().strip()
+        try:
+            start_dir = (
+                str(self.backend._published_dataset_target_path(current))
+                if current
+                else str(self.backend._published_root())
+            )
+        except Exception:
+            start_dir = str(self.backend._published_root())
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Choose Published Dataset Target",
+            start_dir,
+        )
+        if not path:
+            return
+        try:
+            stored = self.backend.set_published_dataset_target(path)
+        except Exception as exc:
+            self.session_profile_status.setText(str(exc))
+            return
+        self.published_target_last_saved = stored
+        self.published_target_edit.setText(stored)
+
+    def _save_published_dataset_target(self) -> None:
+        text = self.published_target_edit.text().strip()
+        if text == self.published_target_last_saved:
+            return
+        try:
+            stored = self.backend.set_published_dataset_target(text)
+        except Exception as exc:
+            self.session_profile_status.setText(str(exc))
+            self.published_target_edit.blockSignals(True)
+            self.published_target_edit.setText(self.published_target_last_saved)
+            self.published_target_edit.blockSignals(False)
+            return
+        self.published_target_last_saved = stored
+        self.published_target_edit.blockSignals(True)
+        self.published_target_edit.setText(stored)
+        self.published_target_edit.blockSignals(False)
 
     def _build_health_panel(self) -> QWidget:
         box = QGroupBox("Subsystem Health")
@@ -712,6 +761,8 @@ class OperatorConsoleQtWindow(QMainWindow):
     def _load_defaults(self) -> None:
         self.session_profile_edit.setText(BUILTIN_SESSION_PROFILE_NAME)
         self._apply_form_config(self.backend.default_form_config())
+        self.published_target_last_saved = self.backend.get_published_dataset_target()
+        self.published_target_edit.setText(self.published_target_last_saved)
         self.session_profile_status.setText(
             f"Loaded built-in {BUILTIN_SESSION_PROFILE_NAME} session profile."
         )
@@ -751,8 +802,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         ]
 
         return {
-            "dataset_id": self._get_field("dataset_id"),
-            "robot_id": self._get_field("robot_id"),
             "task_name": self._get_field("task_name"),
             "language_instruction": self._get_field("language_instruction"),
             "operator": self._get_field("operator"),

@@ -2,8 +2,6 @@ presets:
   default:
     label: "Default"
     active_arms: "lightning"
-    dataset_id: "spark_multisensor_lightning_v1"
-    robot_id: "spark_lightning"
     task_name: "pick_place"
     language_instruction: "pick up the object and place it in the target area"
     operator: ""

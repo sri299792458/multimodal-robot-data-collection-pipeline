@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Convert one raw V1 rosbag episode into the published LeRobot dataset."""
+"""Convert one raw V2 rosbag episode into the published LeRobot dataset."""
 
 from __future__ import annotations
 
@@ -542,7 +542,7 @@ def compare_feature_specs(existing: dict[str, dict], expected: dict[str, dict]) 
 def get_or_create_dataset(
     dataset_root: Path,
     dataset_id: str,
-    robot_type: str,
+    robot_type: str | None,
     fps: int,
     features: dict[str, dict[str, Any]],
     vcodec: str,
@@ -1221,7 +1221,9 @@ def main(argv: list[str] | None = None) -> int:
     image_shapes = image_shapes_from_frames(frames, image_fields)
     features = build_features(effective_profile, image_shapes)
 
-    dataset_id = args.published_dataset_id or manifest_dataset_id(manifest)
+    dataset_id = args.published_dataset_id
+    if not dataset_id:
+        raise RuntimeError("Conversion requires --published-dataset-id.")
     dataset_root = args.published_root / dataset_id
     artifact_dir = dataset_root / "meta" / "spark_conversion" / manifest_episode_id(manifest)
     if artifact_dir.exists():

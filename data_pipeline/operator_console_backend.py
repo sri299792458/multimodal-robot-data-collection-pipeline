@@ -47,6 +47,7 @@ PRESETS_PATH = REPO_ROOT / "data_pipeline" / "configs" / "operator_console_prese
 STATE_DIR = REPO_ROOT / ".operator_console"
 CAPTURE_PLAN_DIR = STATE_DIR / "capture_plans"
 SESSION_PROFILES_DIR = STATE_DIR / "session_profiles"
+SETTINGS_PATH = STATE_DIR / "settings.yaml"
 TOPIC_PROBE_SCRIPT = REPO_ROOT / "data_pipeline" / "ros_topic_probe.py"
 VIEWER_REPO = REPO_ROOT / "lerobot-dataset-visualizer"
 VIEWER_BUN = Path.home() / ".bun" / "bin" / "bun"
@@ -79,6 +80,7 @@ class OperatorConsoleBackend:
     def __init__(self, presets_path: Path = PRESETS_PATH):
         self.presets_path = Path(presets_path)
         self.default_config = self._load_default_config()
+        self.local_settings = self._load_local_settings()
         self.processes = {
             "spark_devices": ManagedProcess("spark_devices", "SPARK Devices"),
             "teleop_gui": ManagedProcess("teleop_gui", "Teleop GUI"),
@@ -137,6 +139,17 @@ class OperatorConsoleBackend:
             spec = presets[first_key]
         return json.loads(json.dumps(spec))
 
+    def _load_local_settings(self) -> dict[str, Any]:
+        if not SETTINGS_PATH.exists():
+            return {}
+        data = load_yaml(SETTINGS_PATH)
+        return data if isinstance(data, dict) else {}
+
+    def _save_local_settings(self) -> None:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with SETTINGS_PATH.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(self.local_settings, handle, sort_keys=True)
+
     def default_form_config(self) -> dict[str, Any]:
         return json.loads(json.dumps(self.default_config))
 
@@ -164,8 +177,6 @@ class OperatorConsoleBackend:
     def _session_profile_to_form_config(self, profile: dict[str, Any]) -> dict[str, Any]:
         config = self.default_form_config()
         for key in (
-            "dataset_id",
-            "robot_id",
             "task_name",
             "language_instruction",
             "operator",
@@ -181,8 +192,6 @@ class OperatorConsoleBackend:
 
     def _form_config_to_session_profile(self, config: dict[str, Any]) -> dict[str, Any]:
         return {
-            "dataset_id": str(config.get("dataset_id", "")).strip(),
-            "robot_id": str(config.get("robot_id", "")).strip(),
             "task_name": str(config.get("task_name", "")).strip(),
             "language_instruction": str(config.get("language_instruction", "")).strip(),
             "operator": str(config.get("operator", "")).strip(),
@@ -190,6 +199,49 @@ class OperatorConsoleBackend:
             "sensors_file": str(config.get("sensors_file", "")).strip(),
             "session_devices": json.loads(json.dumps(config.get("session_devices", []))),
         }
+
+    def _published_root(self) -> Path:
+        return (REPO_ROOT / "published").resolve()
+
+    def _normalize_published_dataset_target(self, target_ref: str) -> Path:
+        published_root = self._published_root()
+        ref = str(target_ref).strip()
+        if not ref:
+            raise ValueError("Published dataset target is empty.")
+        candidate = Path(ref).expanduser()
+        if candidate.is_absolute():
+            target_path = candidate.resolve()
+        elif len(candidate.parts) == 1:
+            target_path = (published_root / candidate).resolve()
+        else:
+            target_path = (REPO_ROOT / candidate).resolve()
+        try:
+            relative = target_path.relative_to(published_root)
+        except ValueError as exc:
+            raise ValueError(f"Published dataset target must live under {published_root}") from exc
+        if len(relative.parts) != 1 or not relative.parts[0]:
+            raise ValueError("Published dataset target must be a direct child of published/.")
+        return target_path
+
+    def get_published_dataset_target(self) -> str:
+        return str(self.local_settings.get("published_dataset_target", "")).strip()
+
+    def set_published_dataset_target(self, target_ref: str) -> str:
+        if not str(target_ref).strip():
+            self.local_settings.pop("published_dataset_target", None)
+            self._save_local_settings()
+            return ""
+        target_path = self._normalize_published_dataset_target(target_ref)
+        stored = str(target_path.relative_to(REPO_ROOT))
+        self.local_settings["published_dataset_target"] = stored
+        self._save_local_settings()
+        return stored
+
+    def _published_dataset_target_path(self, target_ref: str | None = None) -> Path | None:
+        ref = str(target_ref or self.get_published_dataset_target()).strip()
+        if not ref:
+            return None
+        return self._normalize_published_dataset_target(ref)
 
     def get_session_profile(self, profile_ref: str) -> dict[str, Any]:
         ref = self._normalize_profile_name(profile_ref)
@@ -238,6 +290,7 @@ class OperatorConsoleBackend:
         return {
             "session_state": self.session_state(config),
             "validation_state": self.validation_state(config),
+            "published_dataset_target": self.get_published_dataset_target(),
             "processes": {
                 name: {
                     "display_name": proc.display_name,
@@ -371,9 +424,13 @@ class OperatorConsoleBackend:
         if not self.latest_episode_id:
             self.last_action_error = "No recorded episode is known yet."
             return
-        command = self._build_convert_command(config, self.latest_episode_id)
+        target_path = self._published_dataset_target_path()
+        if target_path is None:
+            self.last_action_error = "Choose a published dataset target before converting."
+            return
+        command = self._build_convert_command(config, self.latest_episode_id, target_path=target_path)
         self._start_process("converter", command)
-        self.pending_conversion_dataset_id = str(config["dataset_id"])
+        self.pending_conversion_dataset_id = target_path.name
         self.latest_conversion_output = ""
         self._record_event(
             "start_conversion",
@@ -474,9 +531,9 @@ class OperatorConsoleBackend:
 
     def _viewer_dataset_candidates(self, config: dict[str, Any]) -> list[str]:
         candidates: list[str] = []
-        config_dataset_id = str(config.get("dataset_id", "")).strip()
-        if config_dataset_id:
-            candidates.append(config_dataset_id)
+        target_path = self._published_dataset_target_path()
+        if target_path is not None:
+            candidates.append(target_path.name)
         if self.latest_dataset_id and self.latest_dataset_id not in candidates:
             candidates.append(self.latest_dataset_id)
         return candidates
@@ -1195,14 +1252,10 @@ class OperatorConsoleBackend:
         args = [
             shlex.quote(SYSTEM_PYTHON),
             "data_pipeline/record_episode.py",
-            "--dataset-id",
-            shlex.quote(str(config["dataset_id"])),
             "--task-name",
             shlex.quote(str(config["task_name"])),
             "--language-instruction",
             shlex.quote(str(config.get("language_instruction", ""))),
-            "--robot-id",
-            shlex.quote(str(config["robot_id"])),
             "--operator",
             shlex.quote(str(config["operator"])),
             "--active-arms",
@@ -1218,17 +1271,17 @@ class OperatorConsoleBackend:
             args.append("--dry-run")
         return f"source {shlex.quote(ROS_SETUP)} && " + " ".join(args)
 
-    def _build_convert_command(self, config: dict[str, Any], episode_id: str) -> str:
+    def _build_convert_command(self, config: dict[str, Any], episode_id: str, *, target_path: Path) -> str:
         episode_dir = REPO_ROOT / "raw_episodes" / episode_id
-        published_root = REPO_ROOT / "published"
-        dataset_id = str(config.get("dataset_id", "")).strip()
+        published_root = target_path.parent
+        dataset_id = target_path.name
         args = [
             shlex.quote(str(CONVERTER_PYTHON)),
             "data_pipeline/convert_episode_bag_to_lerobot.py",
             shlex.quote(str(episode_dir)),
+            "--published-dataset-id",
+            shlex.quote(dataset_id),
         ]
-        if dataset_id:
-            args.extend(["--published-dataset-id", shlex.quote(dataset_id)])
         args.extend(["--published-root", shlex.quote(str(published_root))])
         return f"source {shlex.quote(ROS_SETUP)} && " + " ".join(args)
 
@@ -1304,10 +1357,8 @@ class OperatorConsoleBackend:
 
     def _config_signature(self, config: dict[str, Any]) -> str:
         keys = [
-            "dataset_id",
             "task_name",
             "language_instruction",
-            "robot_id",
             "operator",
             "active_arms",
             "sensors_file",

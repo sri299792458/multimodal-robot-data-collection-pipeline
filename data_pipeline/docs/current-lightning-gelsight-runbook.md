@@ -27,7 +27,6 @@ It is intentionally concrete, not general.
 Current published dataset identifiers for this embodiment:
 
 - `dataset_id=spark_multisensor_lightning_tactile_v1`
-- `robot_id=spark_lightning`
 - `profile=multisensor_20hz_lightning`
 - `active_arms=lightning`
 
@@ -127,10 +126,8 @@ Terminal 6:
 ```bash
 spark
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id spark_multisensor_lightning_tactile_v1 \
   --task-name pick_place \
   --language-instruction "pick up the object and place it in the target area" \
-  --robot-id spark_lightning \
   --operator srinivas \
   --active-arms lightning \
   --sensors-file data_pipeline/configs/sensors.local.yaml \
@@ -153,10 +150,8 @@ Terminal 6:
 ```bash
 spark
 /usr/bin/python3 data_pipeline/record_episode.py \
-  --dataset-id spark_multisensor_lightning_tactile_v1 \
   --task-name pick_place \
   --language-instruction "pick up the object and place it in the target area" \
-  --robot-id spark_lightning \
   --operator srinivas \
   --active-arms lightning \
   --sensors-file data_pipeline/configs/sensors.local.yaml

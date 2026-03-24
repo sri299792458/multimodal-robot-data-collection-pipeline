@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Run the minimal V1 eval set against dummy and optional real raw episodes."""
+"""Run the minimal V2 eval set against dummy and optional real raw episodes."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from data_pipeline.convert_episode_bag_to_lerobot import main as convert_episode
 from data_pipeline.generate_dummy_episode import main as generate_dummy_episode_main  # noqa: E402
 from data_pipeline.pipeline_utils import (  # noqa: E402
     DEFAULT_PROFILE_PATH,
-    manifest_dataset_id,
     manifest_episode_id,
     write_json,
 )
@@ -58,8 +57,6 @@ def generate_dummy_episode(raw_root: Path, profile: str | Path) -> Path:
             str(raw_root),
             "--episode-id",
             episode_id,
-            "--dataset-id",
-            "eval_dummy_multisensor_v1",
             "--duration-s",
             "0.5",
             "--include-tactile",
@@ -72,9 +69,11 @@ def generate_dummy_episode(raw_root: Path, profile: str | Path) -> Path:
     return episode_dir
 
 
-def convert_episode(episode_dir: Path, published_root: Path, profile: str) -> dict[str, Any]:
+def convert_episode(episode_dir: Path, published_root: Path, profile: str, dataset_id: str) -> dict[str, Any]:
     cmd = [
         str(episode_dir),
+        "--published-dataset-id",
+        dataset_id,
         "--published-root",
         str(published_root),
     ]
@@ -86,13 +85,13 @@ def convert_episode(episode_dir: Path, published_root: Path, profile: str) -> di
         raise RuntimeError(f"Episode conversion failed with exit code {rc} for {episode_dir}")
 
     manifest = read_json(episode_dir / "episode_manifest.json")
-    dataset_root = published_root / manifest_dataset_id(manifest)
+    dataset_root = published_root / dataset_id
     artifact_root = dataset_root / "meta" / "spark_conversion" / manifest_episode_id(manifest)
     return {
         "episode_id": manifest_episode_id(manifest),
-        "dataset_id": manifest_dataset_id(manifest),
+        "dataset_id": dataset_id,
         "conversion_summary": read_json(artifact_root / "conversion_summary.json"),
-        "dataset_snapshot": dataset_snapshot(dataset_root, manifest_dataset_id(manifest)),
+        "dataset_snapshot": dataset_snapshot(dataset_root, dataset_id),
         "artifact_root": str(artifact_root),
     }
 
@@ -102,9 +101,10 @@ def evaluate_episode(
     episode_dir: Path,
     published_root: Path,
     profile: str,
+    dataset_id: str,
 ) -> dict[str, Any]:
     try:
-        result = convert_episode(episode_dir, published_root, profile)
+        result = convert_episode(episode_dir, published_root, profile, dataset_id)
     except Exception as exc:  # noqa: BLE001
         return {
             "label": label,
@@ -147,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_root.mkdir(parents=True, exist_ok=True)
     published_root.mkdir(parents=True, exist_ok=True)
     report_root.mkdir(parents=True, exist_ok=True)
+    eval_dataset_id = "eval_dummy_multisensor_v2"
 
     entries: list[dict[str, Any]] = []
 
@@ -159,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                 episode_dir=dummy_episode_dir,
                 published_root=published_root,
                 profile=str(dummy_profile),
+                dataset_id=eval_dataset_id,
             )
         )
 
@@ -170,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                 episode_dir=episode_dir,
                 published_root=published_root,
                 profile=str(args.profile),
+                dataset_id=eval_dataset_id,
             )
         )
 

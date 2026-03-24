@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-"""Record one raw V1 episode into a bag plus manifest."""
+"""Record one raw V2 episode into a bag plus manifest."""
 
 from __future__ import annotations
 
@@ -48,10 +48,8 @@ DEFAULT_COMMAND_TRIM_PAD_AFTER_S = 1.0
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset-id", required=True)
     parser.add_argument("--task-name", required=True)
     parser.add_argument("--language-instruction", default="")
-    parser.add_argument("--robot-id", required=True)
     parser.add_argument("--operator", required=True)
     parser.add_argument("--profile", default="auto")
     parser.add_argument("--raw-root", default=str(DEFAULT_RAW_EPISODES_DIR))
@@ -136,10 +134,8 @@ def build_manifest(
         "manifest_schema_version": MANIFEST_SCHEMA_VERSION,
         "episode": {
             "episode_id": args.episode_id,
-            "dataset_id": args.dataset_id,
             "task_name": args.task_name,
             "language_instruction": str(args.language_instruction).strip() or None,
-            "robot_id": args.robot_id,
             "active_arms": active_arms,
             "operator": args.operator,
         },
