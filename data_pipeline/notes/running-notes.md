@@ -2044,6 +2044,13 @@
 ### Operator console metadata cleanup
 
 - Removed the leftover `Optional` panel from [operator_console_qt.py](/home/srinivas/Desktop/pipeline/data_pipeline/operator_console_qt.py).
-- Kept only a small `Episode Notes` field in the main preset/metadata section.
 - Removed the `Extra Topics` field from the Qt workflow so the V2 UI no longer advertises a manual topic-selection escape hatch.
 - Simplified the session-plan summary in the UI to report the resolved topic count directly rather than mentioning extra-topic counts.
+
+### Post-take episode notes
+
+- Removed the pre-record notes field from the main preset/metadata form in [operator_console_qt.py](/home/srinivas/Desktop/pipeline/data_pipeline/operator_console_qt.py).
+- Added an optional post-take note editor under `Latest Artifacts` that targets the latest recorded episode only.
+- The note editor now resets when a new `latest_episode_id` appears, so notes do not leak from one take to the next.
+- Added [OperatorConsoleBackend.save_latest_episode_notes()](/home/srinivas/Desktop/pipeline/data_pipeline/operator_console_backend.py) to rewrite only the `## Notes` section of the latest episode’s `notes.md`.
+- Removed Qt-side pre-record note injection into `record_episode.py`; notes are now a post-take annotation flow instead of session metadata.

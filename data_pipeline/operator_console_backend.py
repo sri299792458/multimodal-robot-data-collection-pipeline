@@ -96,6 +96,7 @@ class OperatorConsoleBackend:
         self.latest_dataset_id: str | None = None
         self.latest_viewer_url: str | None = None
         self.latest_conversion_output = ""
+        self.latest_episode_notes_output = ""
         self.latest_recording_ok: bool | None = None
         self.latest_recording_check_output = ""
         self.recording_check_running = False
@@ -183,6 +184,7 @@ class OperatorConsoleBackend:
             "latest_dataset_id": self.latest_dataset_id,
             "latest_viewer_url": self.latest_viewer_url,
             "latest_conversion_output": self.latest_conversion_output,
+            "latest_episode_notes_output": self.latest_episode_notes_output,
             "latest_recording_ok": self.latest_recording_ok,
             "latest_recording_check_output": self.latest_recording_check_output,
             "recording_check_running": self.recording_check_running,
@@ -280,6 +282,7 @@ class OperatorConsoleBackend:
         episode_id = make_episode_id()
         self._refresh_session_capture_plan(config)
         self.latest_episode_id = episode_id
+        self.latest_episode_notes_output = ""
         self.latest_recording_ok = None
         self.latest_recording_check_output = ""
         self.recording_check_running = False
@@ -307,6 +310,36 @@ class OperatorConsoleBackend:
             "start_conversion",
             {"episode_id": self.latest_episode_id, "dataset_id": self.pending_conversion_dataset_id},
         )
+
+    def save_latest_episode_notes(self, note_text: str) -> None:
+        self.last_action_error = ""
+        self.latest_episode_notes_output = ""
+        if not self.latest_episode_id:
+            self.last_action_error = "No recorded episode is available yet."
+            return
+        if self.processes["recorder"].state == "running":
+            self.last_action_error = "Stop recording before saving episode notes."
+            return
+
+        cleaned = note_text.strip()
+        if not cleaned:
+            self.last_action_error = "Episode notes are empty."
+            return
+
+        notes_path = REPO_ROOT / "raw_episodes" / self.latest_episode_id / "notes.md"
+        if not notes_path.exists():
+            self.last_action_error = f"Notes file not found for {self.latest_episode_id}."
+            return
+
+        try:
+            existing = notes_path.read_text(encoding="utf-8")
+            notes_path.write_text(self._replace_notes_section(existing, cleaned), encoding="utf-8")
+        except Exception as exc:
+            self.last_action_error = str(exc)
+            return
+
+        self.latest_episode_notes_output = f"Saved notes for {self.latest_episode_id}"
+        self._record_event("save_episode_notes", {"episode_id": self.latest_episode_id})
 
     def open_viewer(self, config: dict[str, Any]) -> None:
         self.last_action_error = ""
@@ -1122,12 +1155,9 @@ class OperatorConsoleBackend:
             "--sensors-file",
             shlex.quote(str(config["sensors_file"])),
         ]
-        notes = str(config.get("notes", "")).strip()
         extra_topics = str(config.get("extra_topics", "")).strip()
         if episode_id:
             args.extend(["--episode-id", shlex.quote(episode_id)])
-        if notes:
-            args.extend(["--notes", shlex.quote(notes)])
         if extra_topics:
             args.extend(["--extra-topics", shlex.quote(extra_topics)])
         if self.current_session_capture_plan_path is not None:
@@ -1267,6 +1297,21 @@ class OperatorConsoleBackend:
         self.current_session_capture_plan = plan
         self.current_session_capture_plan_path = plan_path
         self._persist_session_log()
+
+    @staticmethod
+    def _replace_notes_section(existing_text: str, note_text: str) -> str:
+        lines = existing_text.splitlines()
+        try:
+            notes_index = lines.index("## Notes")
+        except ValueError:
+            prefix = lines[:]
+            if prefix and prefix[-1] != "":
+                prefix.append("")
+            prefix.extend(["## Notes", ""])
+            return "\n".join(prefix + note_text.splitlines()) + "\n"
+
+        updated = lines[: notes_index + 1] + [""] + note_text.splitlines()
+        return "\n".join(updated) + "\n"
 
     def _preview_session_capture_plan(self, config: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         try:

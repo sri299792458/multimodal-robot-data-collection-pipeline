@@ -104,7 +104,6 @@ Includes:
 - task name
 - language instruction
 - operator
-- episode notes
 - active arms
 - sensors file
 - viewer URL
@@ -194,6 +193,18 @@ The operator must always be able to see:
 - last recording check
 - last conversion output
 - recent process logs
+
+### 7. Latest episode notes
+
+Post-take episode notes are optional.
+
+They must:
+
+- attach to the latest recorded episode only
+- be saved after a take, not before recording starts
+- reset to blank when a new episode becomes current
+
+They must not be treated as session-level configuration.
 
 
 ## Source And Match Semantics

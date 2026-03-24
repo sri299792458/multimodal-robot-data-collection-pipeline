@@ -176,6 +176,7 @@ class OperatorConsoleQtWindow(QMainWindow):
 
         self.last_log_render = ""
         self.last_output_render = ""
+        self.notes_target_episode_id = ""
 
         self.form_widgets: dict[str, QLineEdit | QComboBox | QCheckBox] = {}
         self.health_cards: dict[str, HealthCard] = {}
@@ -268,7 +269,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.form_widgets["task_name"] = QLineEdit()
         self.form_widgets["language_instruction"] = QLineEdit()
         self.form_widgets["operator"] = QLineEdit(os.environ.get("USER", ""))
-        self.form_widgets["notes"] = QLineEdit()
         active_arms = QComboBox()
         active_arms.addItems(["lightning", "thunder", "lightning,thunder"])
         self.form_widgets["active_arms"] = active_arms
@@ -279,7 +279,6 @@ class OperatorConsoleQtWindow(QMainWindow):
             ("Task Name", "task_name"),
             ("Language", "language_instruction"),
             ("Operator", "operator"),
-            ("Episode Notes", "notes"),
             ("Active Arms", "active_arms"),
         ]:
             form.addRow(label, self.form_widgets[key])
@@ -611,6 +610,27 @@ class OperatorConsoleQtWindow(QMainWindow):
         artifacts_layout.addRow("Episode", self.latest_episode_label)
         artifacts_layout.addRow("Dataset", self.latest_dataset_label)
         artifacts_layout.addRow("Viewer", self.latest_viewer_label)
+
+        notes_container = QWidget()
+        notes_layout = QVBoxLayout(notes_container)
+        notes_layout.setContentsMargins(0, 0, 0, 0)
+        notes_layout.setSpacing(6)
+        self.latest_episode_notes_text = QPlainTextEdit()
+        self.latest_episode_notes_text.setPlaceholderText("Optional post-take notes for the latest episode.")
+        self.latest_episode_notes_text.setMaximumHeight(110)
+        self.latest_episode_notes_text.textChanged.connect(self._update_episode_notes_button_state)
+        notes_layout.addWidget(self.latest_episode_notes_text)
+        notes_row = QHBoxLayout()
+        notes_row.setContentsMargins(0, 0, 0, 0)
+        notes_row.setSpacing(8)
+        self.save_episode_notes_button = QPushButton("Save Episode Notes")
+        self.save_episode_notes_button.clicked.connect(self._save_latest_episode_notes)
+        self.latest_episode_notes_status = QLabel("")
+        self.latest_episode_notes_status.setWordWrap(True)
+        notes_row.addWidget(self.save_episode_notes_button)
+        notes_row.addWidget(self.latest_episode_notes_status, 1)
+        notes_layout.addLayout(notes_row)
+        artifacts_layout.addRow("Post-take Notes", notes_container)
         return artifacts_box
 
     def _build_health_panel(self) -> QWidget:
@@ -758,7 +778,6 @@ class OperatorConsoleQtWindow(QMainWindow):
         self._set_field("active_arms", str(preset.get("active_arms", "lightning")))
         self._set_field("sensors_file", str(preset.get("sensors_file", "data_pipeline/configs/sensors.local.yaml")))
         self._set_field("viewer_base_url", str(preset.get("viewer_base_url", "")))
-        self._set_field("notes", "")
         inventory = self.backend.discover_session_inventory(self._discovery_seed_config(preset))
         self._set_session_inventory(inventory, preserve_existing=False)
 
@@ -811,7 +830,6 @@ class OperatorConsoleQtWindow(QMainWindow):
             "realsense_enabled": bool(enabled_realsense),
             "gelsight_enabled": bool(enabled_gelsights),
             "viewer_base_url": self._get_field("viewer_base_url"),
-            "notes": self._get_field("notes"),
         }
 
     def _start_session(self) -> None:
@@ -831,6 +849,10 @@ class OperatorConsoleQtWindow(QMainWindow):
     def _stop_recording(self) -> None:
         self.backend.stop_recording()
         self._focus_process_logs("recorder")
+
+    def _save_latest_episode_notes(self) -> None:
+        self.backend.save_latest_episode_notes(self.latest_episode_notes_text.toPlainText())
+        self._update_episode_notes_status(self.backend.snapshot(self._config()))
 
     def _convert_latest(self) -> None:
         self.backend.start_conversion(self._config())
@@ -854,14 +876,43 @@ class OperatorConsoleQtWindow(QMainWindow):
         config = self._config()
         self.backend.request_health_refresh(config)
         snapshot = self.backend.snapshot(config)
-        self.latest_episode_label.setText(snapshot.get("latest_episode_id") or "")
+        latest_episode_id = str(snapshot.get("latest_episode_id") or "")
+        self._sync_episode_notes_target(latest_episode_id)
+        self.latest_episode_label.setText(latest_episode_id)
         self.latest_dataset_label.setText(snapshot.get("latest_dataset_id") or "")
         self.latest_viewer_label.setText(snapshot.get("latest_viewer_url") or "")
+        self._update_episode_notes_status(snapshot)
         self._render_session_plan(snapshot)
         self._render_health(snapshot.get("health", {}))
         self._render_logs(snapshot)
         self._render_output(snapshot)
         self._update_button_states(snapshot)
+
+    def _sync_episode_notes_target(self, latest_episode_id: str) -> None:
+        if latest_episode_id == self.notes_target_episode_id:
+            return
+        self.notes_target_episode_id = latest_episode_id
+        self.latest_episode_notes_text.blockSignals(True)
+        self.latest_episode_notes_text.setPlainText("")
+        self.latest_episode_notes_text.blockSignals(False)
+        self.latest_episode_notes_status.setText("")
+        self._update_episode_notes_button_state()
+
+    def _update_episode_notes_status(self, snapshot: dict[str, object]) -> None:
+        latest_note_output = str(snapshot.get("latest_episode_notes_output") or "").strip()
+        if latest_note_output:
+            self.latest_episode_notes_status.setText(latest_note_output)
+            return
+        if self.notes_target_episode_id:
+            self.latest_episode_notes_status.setText("Optional. Saved to this episode only.")
+        else:
+            self.latest_episode_notes_status.setText("Record an episode first.")
+
+    def _update_episode_notes_button_state(self) -> None:
+        has_episode = bool(self.notes_target_episode_id)
+        has_text = bool(self.latest_episode_notes_text.toPlainText().strip())
+        recorder_running = self.backend.processes["recorder"].state == "running"
+        self.save_episode_notes_button.setEnabled(has_episode and has_text and not recorder_running)
 
     def _render_session_plan(self, snapshot: dict[str, object]) -> None:
         active_plan = snapshot.get("current_session_capture_plan")
@@ -973,6 +1024,8 @@ class OperatorConsoleQtWindow(QMainWindow):
             lines.extend(["Recording check:", str(snapshot["latest_recording_check_output"]), ""])
         if snapshot.get("latest_conversion_output"):
             lines.extend(["Convert output:", str(snapshot["latest_conversion_output"])])
+        if snapshot.get("latest_episode_notes_output"):
+            lines.extend(["Episode notes:", str(snapshot["latest_episode_notes_output"])])
         rendered = "\n".join(lines).strip()
         if rendered == self.last_output_render:
             return
