@@ -46,10 +46,11 @@ SYSTEM_PYTHON = "/usr/bin/python3"
 PRESETS_PATH = REPO_ROOT / "data_pipeline" / "configs" / "operator_console_presets.yaml"
 STATE_DIR = REPO_ROOT / ".operator_console"
 CAPTURE_PLAN_DIR = STATE_DIR / "capture_plans"
-SESSION_PROFILES_PATH = STATE_DIR / "session_profiles.yaml"
+SESSION_PROFILES_DIR = STATE_DIR / "session_profiles"
 TOPIC_PROBE_SCRIPT = REPO_ROOT / "data_pipeline" / "ros_topic_probe.py"
 VIEWER_REPO = REPO_ROOT / "lerobot-dataset-visualizer"
 VIEWER_BUN = Path.home() / ".bun" / "bin" / "bun"
+BUILTIN_SESSION_PROFILE_NAME = "starter"
 
 
 @dataclass
@@ -145,23 +146,19 @@ class OperatorConsoleBackend:
             raise ValueError("Session profile name is empty.")
         return name
 
-    def _load_session_profiles_file(self) -> dict[str, dict[str, Any]]:
-        if not SESSION_PROFILES_PATH.exists():
-            return {}
-        data = load_yaml(SESSION_PROFILES_PATH)
-        profiles = data.get("profiles", {})
-        if not isinstance(profiles, dict):
-            raise ValueError("session_profiles.yaml must contain a 'profiles' mapping")
-        return {
-            str(name): value
-            for name, value in profiles.items()
-            if isinstance(value, dict)
-        }
+    def session_profiles_dir(self) -> Path:
+        SESSION_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+        return SESSION_PROFILES_DIR
 
-    def _write_session_profiles_file(self, profiles: dict[str, dict[str, Any]]) -> None:
-        SESSION_PROFILES_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with SESSION_PROFILES_PATH.open("w", encoding="utf-8") as handle:
-            yaml.safe_dump({"profiles": profiles}, handle, sort_keys=True)
+    def _profile_path_from_ref(self, profile_ref: str) -> Path:
+        ref = self._normalize_profile_name(profile_ref)
+        candidate = Path(ref).expanduser()
+        looks_like_path = candidate.suffix.lower() in {".yaml", ".yml"} or "/" in ref or candidate.is_absolute()
+        if looks_like_path:
+            if not candidate.is_absolute():
+                candidate = (REPO_ROOT / candidate).resolve()
+            return candidate
+        return self.session_profiles_dir() / f"{ref}.yaml"
 
     def _session_profile_to_form_config(self, profile: dict[str, Any]) -> dict[str, Any]:
         config = self.default_form_config()
@@ -195,31 +192,25 @@ class OperatorConsoleBackend:
             "session_devices": json.loads(json.dumps(config.get("session_devices", []))),
         }
 
-    def list_session_profiles(self) -> list[str]:
-        profiles = self._load_session_profiles_file()
-        names = ["default"]
-        for name in sorted(profiles):
-            if name != "default":
-                names.append(name)
-        return names
-
-    def get_session_profile(self, profile_name: str) -> dict[str, Any]:
-        name = self._normalize_profile_name(profile_name)
-        if name == "default":
+    def get_session_profile(self, profile_ref: str) -> dict[str, Any]:
+        ref = self._normalize_profile_name(profile_ref)
+        if ref == BUILTIN_SESSION_PROFILE_NAME:
             return self.default_form_config()
-        profiles = self._load_session_profiles_file()
-        if name not in profiles:
-            raise KeyError(f"Unknown session profile: {name}")
-        return self._session_profile_to_form_config(profiles[name])
+        path = self._profile_path_from_ref(ref)
+        if not path.exists():
+            raise FileNotFoundError(f"Session profile not found: {path}")
+        profile = load_yaml(path)
+        return self._session_profile_to_form_config(profile)
 
-    def save_session_profile(self, profile_name: str, config: dict[str, Any]) -> str:
-        name = self._normalize_profile_name(profile_name)
-        if name == "default":
-            raise ValueError("Cannot overwrite the built-in default session profile.")
-        profiles = self._load_session_profiles_file()
-        profiles[name] = self._form_config_to_session_profile(config)
-        self._write_session_profiles_file(profiles)
-        return name
+    def save_session_profile(self, profile_ref: str, config: dict[str, Any]) -> Path:
+        ref = self._normalize_profile_name(profile_ref)
+        if ref == BUILTIN_SESSION_PROFILE_NAME:
+            raise ValueError(f"Cannot overwrite the built-in {BUILTIN_SESSION_PROFILE_NAME} session profile.")
+        path = self._profile_path_from_ref(ref)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(self._form_config_to_session_profile(config), handle, sort_keys=True)
+        return path
 
     def session_state(self, config: dict[str, Any]) -> str:
         recorder = self.processes["recorder"]

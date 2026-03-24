@@ -15,6 +15,7 @@ try:
         QApplication,
         QCheckBox,
         QComboBox,
+        QFileDialog,
         QFormLayout,
         QFrame,
         QGridLayout,
@@ -46,7 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from data_pipeline.operator_console_backend import OperatorConsoleBackend
+from data_pipeline.operator_console_backend import BUILTIN_SESSION_PROFILE_NAME, OperatorConsoleBackend
 from data_pipeline.pipeline_utils import role_choices_for_kind
 
 
@@ -238,13 +239,15 @@ class OperatorConsoleQtWindow(QMainWindow):
         profile_layout = QHBoxLayout(profile_row)
         profile_layout.setContentsMargins(0, 0, 0, 0)
         profile_layout.setSpacing(8)
-        self.session_profile_combo = QComboBox()
-        self.session_profile_combo.setEditable(True)
+        self.session_profile_edit = QLineEdit(BUILTIN_SESSION_PROFILE_NAME)
+        self.browse_profile_button = QPushButton("Browse")
+        self.browse_profile_button.clicked.connect(self._browse_session_profile)
         self.load_profile_button = QPushButton("Load")
         self.load_profile_button.clicked.connect(self._load_selected_session_profile)
         self.save_profile_button = QPushButton("Save")
         self.save_profile_button.clicked.connect(self._save_selected_session_profile)
-        profile_layout.addWidget(self.session_profile_combo, 1)
+        profile_layout.addWidget(self.session_profile_edit, 1)
+        profile_layout.addWidget(self.browse_profile_button)
         profile_layout.addWidget(self.load_profile_button)
         profile_layout.addWidget(self.save_profile_button)
         form.addRow("Session Profile", profile_row)
@@ -283,9 +286,17 @@ class OperatorConsoleQtWindow(QMainWindow):
         form.setSpacing(10)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        sensors_file_row = QWidget()
+        sensors_file_layout = QHBoxLayout(sensors_file_row)
+        sensors_file_layout.setContentsMargins(0, 0, 0, 0)
+        sensors_file_layout.setSpacing(8)
         self.form_widgets["sensors_file"] = QLineEdit("data_pipeline/configs/sensors.local.yaml")
+        self.browse_sensors_button = QPushButton("Browse")
+        self.browse_sensors_button.clicked.connect(self._browse_sensors_file)
+        sensors_file_layout.addWidget(self.form_widgets["sensors_file"], 1)
+        sensors_file_layout.addWidget(self.browse_sensors_button)
         self.form_widgets["viewer_base_url"] = QLineEdit("http://10.33.55.65:3000")
-        form.addRow("Sensors File", self.form_widgets["sensors_file"])
+        form.addRow("Sensors File", sensors_file_row)
         form.addRow("Viewer Base URL", self.form_widgets["viewer_base_url"])
         layout.addLayout(form)
 
@@ -347,13 +358,33 @@ class OperatorConsoleQtWindow(QMainWindow):
                     device["role"] = existing_role
         self._set_session_devices(discovered_devices)
 
-    def _refresh_session_profile_choices(self, *, selected_name: str = "") -> None:
-        current_text = selected_name or self.session_profile_combo.currentText().strip()
-        self.session_profile_combo.blockSignals(True)
-        self.session_profile_combo.clear()
-        self.session_profile_combo.addItems(self.backend.list_session_profiles())
-        self.session_profile_combo.setEditText(current_text or "default")
-        self.session_profile_combo.blockSignals(False)
+    def _browse_session_profile(self) -> None:
+        start_dir = str(self.backend.session_profiles_dir())
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose Session Profile",
+            start_dir,
+            "YAML Files (*.yaml *.yml)",
+        )
+        if path:
+            self.session_profile_edit.setText(path)
+
+    def _browse_sensors_file(self) -> None:
+        current = str(self._get_field("sensors_file")).strip()
+        start_dir = str((REPO_ROOT / current).resolve().parent) if current else str(REPO_ROOT / "data_pipeline" / "configs")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose Sensors File",
+            start_dir,
+            "YAML Files (*.yaml *.yml)",
+        )
+        if not path:
+            return
+        try:
+            rel = str(Path(path).resolve().relative_to(REPO_ROOT))
+        except ValueError:
+            rel = path
+        self._set_field("sensors_file", rel)
 
     def _apply_form_config(self, config: dict[str, object]) -> None:
         self._set_field("dataset_id", str(config.get("dataset_id", "")))
@@ -374,25 +405,39 @@ class OperatorConsoleQtWindow(QMainWindow):
         self._set_discovered_devices(devices, preserve_existing=False)
 
     def _load_selected_session_profile(self) -> None:
-        profile_name = self.session_profile_combo.currentText().strip()
+        profile_name = self.session_profile_edit.text().strip()
         try:
             config = self.backend.get_session_profile(profile_name)
         except Exception as exc:
             self.session_profile_status.setText(str(exc))
             return
         self._apply_form_config(config)
-        self._refresh_session_profile_choices(selected_name=profile_name or "default")
-        self.session_profile_status.setText(f"Loaded session profile: {profile_name or 'default'}")
+        self.session_profile_status.setText(
+            f"Loaded session profile: {profile_name or BUILTIN_SESSION_PROFILE_NAME}"
+        )
 
     def _save_selected_session_profile(self) -> None:
-        profile_name = self.session_profile_combo.currentText().strip()
+        profile_name = self.session_profile_edit.text().strip()
+        if not profile_name or profile_name == BUILTIN_SESSION_PROFILE_NAME:
+            suggested = str(self.backend.session_profiles_dir() / "new_session_profile.yaml")
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Session Profile",
+                suggested,
+                "YAML Files (*.yaml *.yml)",
+            )
+            if not path:
+                self.session_profile_status.setText("Save canceled.")
+                return
+            profile_name = path
+            self.session_profile_edit.setText(path)
         try:
-            saved_name = self.backend.save_session_profile(profile_name, self._config())
+            saved_path = self.backend.save_session_profile(profile_name, self._config())
         except Exception as exc:
             self.session_profile_status.setText(str(exc))
             return
-        self._refresh_session_profile_choices(selected_name=saved_name)
-        self.session_profile_status.setText(f"Saved session profile: {saved_name}")
+        self.session_profile_edit.setText(str(saved_path))
+        self.session_profile_status.setText(f"Saved session profile: {saved_path}")
 
     def _append_session_device_row(self, device: dict[str, object]) -> None:
         row = self.session_devices_table.rowCount()
@@ -666,9 +711,11 @@ class OperatorConsoleQtWindow(QMainWindow):
         )
 
     def _load_defaults(self) -> None:
-        self._refresh_session_profile_choices(selected_name="default")
+        self.session_profile_edit.setText(BUILTIN_SESSION_PROFILE_NAME)
         self._apply_form_config(self.backend.default_form_config())
-        self.session_profile_status.setText("Loaded built-in default session profile.")
+        self.session_profile_status.setText(
+            f"Loaded built-in {BUILTIN_SESSION_PROFILE_NAME} session profile."
+        )
 
     def _set_field(self, key: str, value: str | bool) -> None:
         widget = self.form_widgets[key]

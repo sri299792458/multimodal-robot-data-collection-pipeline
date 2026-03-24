@@ -65,9 +65,16 @@ This is session-level metadata, not device identity.
 
 The session profile control may:
 
-- load the built-in `default` profile
-- load a user-local saved session profile
-- save the current session metadata and device choices as a user-local profile
+- load the built-in `starter` profile
+- load a user-local saved session profile YAML file
+- save the current session metadata and device choices as a user-local profile YAML file
+
+The operator should be able to choose both:
+
+- the session profile file
+- the sensors file
+
+through file dialogs instead of pasting paths manually.
 
 ### 2. Discovered devices
 
