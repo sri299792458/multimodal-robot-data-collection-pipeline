@@ -261,7 +261,7 @@ class OperatorConsoleQtWindow(QMainWindow):
 
         for label, key in [
             ("Task Name", "task_name"),
-            ("Language (Optional)", "language_instruction"),
+            ("Language Instruction (Optional)", "language_instruction"),
             ("Operator", "operator"),
             ("Active Arms", "active_arms"),
         ]:
