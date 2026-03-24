@@ -1973,3 +1973,12 @@
   - the new canonical session activity topic `/spark/session/teleop_active`
 - Rewrote [session-capture-plan.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/session-capture-plan.md) so it references V2 directly and no longer mixes in transitional implementation-slice history.
 - Updated repo READMEs to point to V2 as the active contract.
+
+### Archived V1 docs restored
+
+- Restored the pre-V2 document bodies into [docs/archive/](/home/srinivas/Desktop/pipeline/data_pipeline/docs/archive) instead of leaving them only in git history.
+- Archived copies now exist for:
+  - [V1_SPEC.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/archive/V1_SPEC.md)
+  - [topic-contract-v1.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/archive/topic-contract-v1.md)
+  - [session-capture-plan-pre-v2.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/archive/session-capture-plan-pre-v2.md)
+- The top-level [V1_SPEC.md](/home/srinivas/Desktop/pipeline/data_pipeline/V1_SPEC.md) now points to both the archive copies and the active V2 docs.
