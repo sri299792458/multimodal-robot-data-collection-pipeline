@@ -1960,3 +1960,16 @@
 - Discovery itself remains passive and does not spawn long-lived child processes.
 - Session-owned processes are still explicit and tracked in `self.processes`, but `_stop_process(...)` now escalates to `SIGKILL` after a short grace period if a child ignores the initial stop signal.
 - This is specifically to avoid the class of lab issue where a launcher or ROS subprocess keeps running in the background after the console thinks it was stopped.
+
+### V2 contract rewrite
+
+- Rewrote the spec layer so there is now one explicit V2 target instead of mixed V1/V2 guidance.
+- Added [V2_SPEC.md](/home/srinivas/Desktop/pipeline/data_pipeline/V2_SPEC.md) as the active top-level contract.
+- Reduced [V1_SPEC.md](/home/srinivas/Desktop/pipeline/data_pipeline/V1_SPEC.md) to an archive pointer only.
+- Rewrote [topic-contract.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/topic-contract.md) to define only the canonical V2 raw topic surface, including:
+  - role-based camera topics like `/spark/cameras/lightning/wrist_0/...`
+  - role-based world scene topics like `/spark/cameras/world/scene_1/...`
+  - role-based tactile topics like `/spark/tactile/lightning/finger_left/...`
+  - the new canonical session activity topic `/spark/session/teleop_active`
+- Rewrote [session-capture-plan.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/session-capture-plan.md) so it references V2 directly and no longer mixes in transitional implementation-slice history.
+- Updated repo READMEs to point to V2 as the active contract.

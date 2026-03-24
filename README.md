@@ -7,4 +7,4 @@ A guide for assembling and flashing the firmware for the SPARK modules can be fo
 Refer to the [Software](./TeleopSoftware/) folder README for details on connecting to universal robotics manipulators, interfacing with: SPARK, SpaceMouse, VR controllers, and WebRTC video streams.
 
 ## Data Pipeline
-The new dataset collection and conversion work lives in [data_pipeline](./data_pipeline/). Start with the [data pipeline README](./data_pipeline/README.md) for the operator runbook, [V1_SPEC.md](./data_pipeline/V1_SPEC.md) for the implementation contract, and [running-notes.md](./data_pipeline/notes/running-notes.md) for the implementation log.
+The new dataset collection and conversion work lives in [data_pipeline](./data_pipeline/). Start with the [data pipeline README](./data_pipeline/README.md) for the operator runbook, [V2_SPEC.md](./data_pipeline/V2_SPEC.md) for the current implementation contract, and [running-notes.md](./data_pipeline/notes/running-notes.md) for the implementation log.

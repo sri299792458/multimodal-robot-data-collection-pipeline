@@ -1,8 +1,10 @@
-# Data Pipeline V1
+# Data Pipeline
 
-This directory contains the V1 raw-capture and LeRobot conversion stack.
+This directory contains the raw-capture and LeRobot conversion stack.
 
-The implementation contract lives in [V1_SPEC.md](./V1_SPEC.md). The running implementation log lives in [notes/running-notes.md](./notes/running-notes.md).
+The current implementation contract lives in [V2_SPEC.md](./V2_SPEC.md). The old [V1_SPEC.md](./V1_SPEC.md) file is archive-only. The running implementation log lives in [notes/running-notes.md](./notes/running-notes.md).
+
+V2 is the authoritative target contract. The codebase is still mid-migration toward it.
 
 The raw bag storage decision lives in [docs/raw-storage.md](./docs/raw-storage.md).
 
