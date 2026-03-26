@@ -18,7 +18,7 @@ The calibration results file tells the pipeline where that camera is.
 - RealSense cameras are calibrated with a ChArUco board.
 - Wrist-camera hand-eye calibration uses UR `getActualTCPPose()`.
 - During wrist calibration, the active UR TCP must be the tool flange.
-- Static scene cameras are solved directly in the `world` frame from a measured `T_world_board`.
+- Static scene cameras are solved automatically in the reference wrist arm base frame from shared board observations.
 
 
 ## Files
@@ -27,7 +27,6 @@ Default local files:
 
 - `data_pipeline/configs/sensors.local.yaml`
 - `data_pipeline/configs/calibration_poses.local.json`
-- `data_pipeline/configs/world_board.local.json`
 - `data_pipeline/configs/calibration.local.json`
 
 
@@ -42,33 +41,12 @@ cp data_pipeline/configs/sensors.example.yaml data_pipeline/configs/sensors.loca
 Fill in the real serial numbers and role metadata for the cameras you want to calibrate.
 
 
-## 2. Measure `T_world_board` For Static Scene Cameras
+## 2. Record Wrist Calibration Poses
 
-Use a rigid probe mounted at a known offset from the tool flange, touch the four board corners, and record the TCP poses.
+Record a set of diverse robot poses while the board is visible to:
 
-Then compute the board transform:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source .venv/bin/activate
-python data_pipeline/compute_world_board.py \
-  --top-left X Y Z RX RY RZ \
-  --top-right X Y Z RX RY RZ \
-  --bottom-right X Y Z RX RY RZ \
-  --bottom-left X Y Z RX RY RZ \
-  --flange-to-contact-m 0.0 0.0 0.162
-```
-
-This writes:
-
-- `data_pipeline/configs/world_board.local.json`
-
-Adjust `--flange-to-contact-m` if your contact point is not 162 mm along flange Z.
-
-
-## 3. Record Wrist Calibration Poses
-
-For wrist cameras, record a set of diverse robot poses while the board is visible.
+- the wrist camera that will anchor the calibration frame
+- any static scene camera you want to calibrate in that same reference frame
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -92,7 +70,7 @@ This writes:
 - `data_pipeline/configs/calibration_poses.local.json`
 
 
-## 4. Run Calibration
+## 3. Run Calibration
 
 Calibrate all roles found in the sensors file:
 
@@ -115,17 +93,22 @@ python data_pipeline/calibrate_rig.py \
 Notes:
 
 - if any selected role is a wrist camera, `calibrate_rig.py` requires `calibration_poses.local.json`
-- if any selected role is a static scene camera, it requires `world_board.local.json`
+- if any selected role is a static scene camera, the runner also needs a wrist camera reference:
+  - if a wrist role is already selected, it uses that
+  - otherwise it auto-picks a configured wrist role from the sensors file
 - the runner reads factory intrinsics from the RealSense SDK and solves:
   - wrist cameras as hand-eye calibration
-  - scene cameras as direct `T_world_camera`
+  - scene cameras automatically from the wrist-calibrated board observations
+- scene-camera extrinsics are expressed in the selected reference wrist arm base frame, for example:
+  - `lightning_base`
+  - `thunder_base`
 
 This writes:
 
 - `data_pipeline/configs/calibration.local.json`
 
 
-## 5. Validate With Click-Point Inspection
+## 4. Validate With Click-Point Inspection
 
 Static scene camera example:
 
@@ -149,11 +132,11 @@ Click a pixel in the RGB image window. The tool prints:
 
 - depth
 - camera-frame point
-- calibrated world-frame point
+- calibrated reference-frame point
 - current TCP pose for wrist cameras
 
 
-## 6. Recording Integration
+## 5. Recording Integration
 
 `record_episode.py` automatically snapshots the current calibration results into `episode_manifest.json` when:
 

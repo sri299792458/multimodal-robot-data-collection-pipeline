@@ -23,7 +23,7 @@ from data_pipeline.calibration import (
     CharucoDetector,
     RealSenseCalibrationCamera,
     calibrate_hand_eye,
-    calibrate_scene_camera,
+    calibrate_scene_camera_from_reference,
     load_arm_connection_info,
     pose6d_to_transform,
 )
@@ -36,12 +36,13 @@ from data_pipeline.pipeline_utils import (
 
 DEFAULT_SENSORS_FILE = PIPELINE_REPO_ROOT / "data_pipeline" / "configs" / "sensors.local.yaml"
 DEFAULT_POSES_FILE = PIPELINE_REPO_ROOT / "data_pipeline" / "configs" / "calibration_poses.local.json"
-DEFAULT_WORLD_BOARD_PATH = PIPELINE_REPO_ROOT / "data_pipeline" / "configs" / "world_board.local.json"
 DEFAULT_RESULTS_FILE = PIPELINE_REPO_ROOT / "data_pipeline" / "configs" / "calibration.local.json"
 
 
 @dataclass
 class CameraObservation:
+    pose_index: int
+    pose_name: str
     target_to_camera: np.ndarray
     reprojection_error_px: float
     base_to_flange: np.ndarray | None = None
@@ -61,15 +62,6 @@ class CameraTarget:
 def _load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def _load_world_board_matrix(path: Path | None) -> np.ndarray | None:
-    if path is None:
-        return None
-    matrix = np.asarray(_load_json(path), dtype=np.float64)
-    if matrix.shape != (4, 4):
-        raise ValueError(f"Expected a 4x4 matrix in {path}, got shape {matrix.shape}")
-    return matrix
 
 
 def _load_pose_file(path: Path | None) -> dict[str, Any] | None:
@@ -132,15 +124,56 @@ def _arm_from_role(role: str) -> str | None:
     return None
 
 
+def _is_wrist_target(target: CameraTarget) -> bool:
+    return target.mount_site.startswith("wrist_")
+
+
+def _is_scene_target(target: CameraTarget) -> bool:
+    return target.mount_site.startswith("scene_")
+
+
+def _default_poses_path() -> Path | None:
+    return DEFAULT_POSES_FILE if DEFAULT_POSES_FILE.exists() else None
+
+
+def _reference_wrist_sort_key(target: CameraTarget) -> tuple[int, str]:
+    if target.attached_to == "lightning":
+        return (0, target.role)
+    if target.attached_to == "thunder":
+        return (1, target.role)
+    return (2, target.role)
+
+
+def _select_reference_wrist_target(
+    wrist_targets: list[CameraTarget],
+    reference_wrist_role: str | None,
+) -> CameraTarget:
+    if not wrist_targets:
+        raise RuntimeError("Automatic scene-camera calibration requires at least one wrist camera role.")
+
+    if reference_wrist_role:
+        requested = str(reference_wrist_role).strip()
+        for target in wrist_targets:
+            if target.role == requested:
+                return target
+        raise RuntimeError(
+            f"Reference wrist role {requested} was not selected. "
+            f"Available wrist roles: {[target.role for target in wrist_targets]}"
+        )
+
+    return sorted(wrist_targets, key=_reference_wrist_sort_key)[0]
+
+
 def _capture_pose_driven_observations(
     *,
     detector: CharucoDetector,
     targets: list[CameraTarget],
     poses_data: dict[str, Any],
+    warmup_frames: int,
     stabilization_s: float,
     move_speed: float,
     move_acceleration: float,
-) -> tuple[dict[str, CalibrationArm], list[str]]:
+) -> None:
     active_arms = list(poses_data.get("active_arms", []))
     arm_handles = {
         arm: CalibrationArm(info, connect_control=True)
@@ -153,7 +186,7 @@ def _capture_pose_driven_observations(
     try:
         for target in targets:
             target.camera.open()
-            target.camera.warmup(10)
+            target.camera.warmup(warmup_frames)
 
         for pose_index, pose in enumerate(pose_list, start=1):
             pose_name = str(pose.get("name", f"pose_{pose_index:03d}"))
@@ -196,6 +229,8 @@ def _capture_pose_driven_observations(
                     base_to_flange = pose6d_to_transform(arm_handles[arm].get_actual_tcp_pose())
                 target.observations.append(
                     CameraObservation(
+                        pose_index=pose_index,
+                        pose_name=pose_name,
                         target_to_camera=target_to_camera,
                         reprojection_error_px=reprojection_error_px,
                         base_to_flange=base_to_flange,
@@ -209,60 +244,8 @@ def _capture_pose_driven_observations(
             target.camera.close()
         for handle in arm_handles.values():
             handle.close()
-    return arm_handles, active_arms
 
-
-def _capture_scene_only_observations(
-    *,
-    detector: CharucoDetector,
-    targets: list[CameraTarget],
-    warmup_frames: int,
-    num_samples: int,
-    max_frames: int,
-    max_reprojection_error_px: float,
-) -> None:
-    try:
-        for target in targets:
-            target.camera.open()
-            target.camera.warmup(warmup_frames)
-
-        for target in targets:
-            used_frames = 0
-            while len(target.observations) < num_samples and used_frames < max_frames:
-                image = target.camera.grab_color()
-                used_frames += 1
-                charuco_corners, charuco_ids = detector.detect(image)
-                if charuco_corners is None or charuco_ids is None:
-                    continue
-                intrinsics = target.camera.get_intrinsics()
-                camera_matrix = np.asarray(intrinsics["camera_matrix"], dtype=np.float64)
-                distortion = np.asarray(intrinsics["distortion_coeffs"], dtype=np.float64)
-                rvec, tvec, reprojection_error_px = detector.estimate_board_pose(
-                    charuco_corners,
-                    charuco_ids,
-                    camera_matrix,
-                    distortion,
-                )
-                if reprojection_error_px > max_reprojection_error_px:
-                    continue
-                target_to_camera = np.eye(4, dtype=np.float64)
-                target_to_camera[:3, :3] = pose6d_to_transform([0.0, 0.0, 0.0, *rvec])[:3, :3]
-                target_to_camera[:3, 3] = tvec
-                target.observations.append(
-                    CameraObservation(
-                        target_to_camera=target_to_camera,
-                        reprojection_error_px=reprojection_error_px,
-                    )
-                )
-            print(
-                f"{target.role}: collected {len(target.observations)} valid scene samples"
-            )
-    finally:
-        for target in targets:
-            target.camera.close()
-
-
-def _build_camera_result(target: CameraTarget, world_from_board: np.ndarray | None) -> dict[str, Any]:
+def _build_wrist_camera_result(target: CameraTarget) -> tuple[dict[str, Any], np.ndarray | None]:
     intrinsics = target.camera.get_intrinsics()
     result = {
         "serial_number": target.serial_number,
@@ -272,48 +255,90 @@ def _build_camera_result(target: CameraTarget, world_from_board: np.ndarray | No
         "intrinsics": intrinsics,
     }
 
-    if target.mount_site.startswith("wrist_"):
-        hand_eye_observations = [obs for obs in target.observations if obs.base_to_flange is not None]
-        hand_eye_result = calibrate_hand_eye(
-            base_to_flange_transforms=[obs.base_to_flange for obs in hand_eye_observations if obs.base_to_flange is not None],
-            target_to_camera_transforms=[obs.target_to_camera for obs in hand_eye_observations],
-            reprojection_errors_px=[obs.reprojection_error_px for obs in hand_eye_observations],
-        )
-        result["type"] = "hand_eye"
-        result["hand_eye_calibration"] = hand_eye_result
+    hand_eye_observations = [obs for obs in target.observations if obs.base_to_flange is not None]
+    hand_eye_result = calibrate_hand_eye(
+        base_to_flange_transforms=[obs.base_to_flange for obs in hand_eye_observations if obs.base_to_flange is not None],
+        target_to_camera_transforms=[obs.target_to_camera for obs in hand_eye_observations],
+        reprojection_errors_px=[obs.reprojection_error_px for obs in hand_eye_observations],
+    )
+    result["type"] = "hand_eye"
+    result["hand_eye_calibration"] = hand_eye_result
+
+    flange_from_camera = None
+    if hand_eye_result.get("success"):
+        flange_from_camera = np.eye(4, dtype=np.float64)
+        flange_from_camera[:3, :3] = np.asarray(hand_eye_result["rotation_matrix"], dtype=np.float64)
+        flange_from_camera[:3, 3] = np.asarray(hand_eye_result["translation_vector"], dtype=np.float64)
+    return result, flange_from_camera
+
+
+def _build_scene_camera_result(
+    *,
+    target: CameraTarget,
+    reference_wrist_target: CameraTarget,
+    reference_flange_from_camera: np.ndarray | None,
+) -> dict[str, Any]:
+    intrinsics = target.camera.get_intrinsics()
+    result = {
+        "serial_number": target.serial_number,
+        "model": target.model,
+        "attached_to": target.attached_to,
+        "mount_site": target.mount_site,
+        "intrinsics": intrinsics,
+        "type": "scene",
+    }
+
+    if reference_flange_from_camera is None:
+        result["extrinsics"] = {
+            "success": False,
+            "error": f"Reference wrist calibration for {reference_wrist_target.role} did not succeed.",
+        }
         return result
 
-    if world_from_board is None:
-        raise RuntimeError(f"Scene camera {target.role} requires --world-board-matrix.")
-    scene_result = calibrate_scene_camera(
-        target_to_camera_transforms=[obs.target_to_camera for obs in target.observations],
-        world_from_target=world_from_board,
-        reprojection_errors_px=[obs.reprojection_error_px for obs in target.observations],
-        reference_frame="world",
+    reference_observations = {
+        obs.pose_index: obs
+        for obs in reference_wrist_target.observations
+        if obs.base_to_flange is not None
+    }
+    base_to_target_transforms: list[np.ndarray] = []
+    scene_target_to_camera_transforms: list[np.ndarray] = []
+    reprojection_errors_px: list[float] = []
+
+    for scene_obs in target.observations:
+        reference_obs = reference_observations.get(scene_obs.pose_index)
+        if reference_obs is None or reference_obs.base_to_flange is None:
+            continue
+        base_to_target = (
+            np.asarray(reference_obs.base_to_flange, dtype=np.float64)
+            @ reference_flange_from_camera
+            @ np.asarray(reference_obs.target_to_camera, dtype=np.float64)
+        )
+        base_to_target_transforms.append(base_to_target)
+        scene_target_to_camera_transforms.append(np.asarray(scene_obs.target_to_camera, dtype=np.float64))
+        reprojection_errors_px.append(float(scene_obs.reprojection_error_px))
+
+    reference_frame = f"{reference_wrist_target.attached_to}_base"
+    result["extrinsics"] = calibrate_scene_camera_from_reference(
+        base_to_target_transforms=base_to_target_transforms,
+        target_to_camera_transforms=scene_target_to_camera_transforms,
+        reprojection_errors_px=reprojection_errors_px,
+        reference_frame=reference_frame,
+        reference_camera_role=reference_wrist_target.role,
     )
-    result["type"] = "scene"
-    result["extrinsics"] = scene_result
     return result
-
-
-def _default_world_board_path() -> Path | None:
-    return DEFAULT_WORLD_BOARD_PATH if DEFAULT_WORLD_BOARD_PATH.exists() else None
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run V2 camera calibration for scene and wrist RealSense cameras.")
     parser.add_argument("--sensors-file", default=str(DEFAULT_SENSORS_FILE))
     parser.add_argument("--camera-role", action="append", default=[])
+    parser.add_argument("--reference-wrist-role", default="")
     parser.add_argument("--poses-file", default="")
-    parser.add_argument("--world-board-matrix", default="")
     parser.add_argument("--output-file", default=str(DEFAULT_RESULTS_FILE))
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--warmup-frames", type=int, default=30)
-    parser.add_argument("--num-samples", type=int, default=30)
-    parser.add_argument("--max-frames", type=int, default=300)
-    parser.add_argument("--max-reprojection-error-px", type=float, default=2.0)
+    parser.add_argument("--warmup-frames", type=int, default=10)
     parser.add_argument("--stabilization-s", type=float, default=1.0)
     parser.add_argument("--move-speed", type=float, default=0.6)
     parser.add_argument("--move-acceleration", type=float, default=0.8)
@@ -344,41 +369,49 @@ def main() -> int:
         height=args.height,
         fps=args.fps,
     )
+    wrist_targets = [target for target in targets if _is_wrist_target(target)]
+    scene_targets = [target for target in targets if _is_scene_target(target)]
+    if scene_targets and not wrist_targets:
+        available_targets = _sensor_targets(
+            sensors_file=sensors_file,
+            selected_roles=None,
+            width=args.width,
+            height=args.height,
+            fps=args.fps,
+        )
+        available_wrist_targets = [target for target in available_targets if _is_wrist_target(target)]
+        reference_wrist_target = _select_reference_wrist_target(
+            available_wrist_targets,
+            str(args.reference_wrist_role).strip() or None,
+        )
+        targets.append(reference_wrist_target)
+        wrist_targets = [reference_wrist_target]
+        print(
+            f"Using reference wrist camera {reference_wrist_target.role} automatically "
+            f"for scene calibration."
+        )
 
-    poses_path = Path(args.poses_file).expanduser() if str(args.poses_file).strip() else None
-    world_board_path = (
-        Path(args.world_board_matrix).expanduser()
-        if str(args.world_board_matrix).strip()
-        else _default_world_board_path()
+    poses_path = (
+        Path(args.poses_file).expanduser()
+        if str(args.poses_file).strip()
+        else _default_poses_path()
     )
-    world_from_board = _load_world_board_matrix(world_board_path)
-
-    has_wrist_targets = any(target.mount_site.startswith("wrist_") for target in targets)
-    if has_wrist_targets and poses_path is None:
-        raise RuntimeError("Wrist-camera calibration requires --poses-file.")
-    if not has_wrist_targets and world_from_board is None:
-        raise RuntimeError("Scene-camera calibration requires --world-board-matrix or data_pipeline/configs/world_board.local.json.")
-
-    poses_data = _load_pose_file(poses_path) if poses_path is not None else None
-    if poses_data is not None:
-        _capture_pose_driven_observations(
-            detector=detector,
-            targets=targets,
-            poses_data=poses_data,
-            stabilization_s=float(args.stabilization_s),
-            move_speed=float(args.move_speed),
-            move_acceleration=float(args.move_acceleration),
+    if poses_path is None:
+        raise RuntimeError(
+            "Calibration requires recorded wrist poses. Run data_pipeline/record_calibration_poses.py first "
+            "or pass --poses-file explicitly."
         )
-    else:
-        scene_targets = [target for target in targets if target.mount_site.startswith("scene_")]
-        _capture_scene_only_observations(
-            detector=detector,
-            targets=scene_targets,
-            warmup_frames=int(args.warmup_frames),
-            num_samples=int(args.num_samples),
-            max_frames=int(args.max_frames),
-            max_reprojection_error_px=float(args.max_reprojection_error_px),
-        )
+
+    poses_data = _load_pose_file(poses_path)
+    _capture_pose_driven_observations(
+        detector=detector,
+        targets=targets,
+        poses_data=poses_data,
+        warmup_frames=int(args.warmup_frames),
+        stabilization_s=float(args.stabilization_s),
+        move_speed=float(args.move_speed),
+        move_acceleration=float(args.move_acceleration),
+    )
 
     results = {
         "version": "1.0",
@@ -386,12 +419,28 @@ def main() -> int:
         "charuco_config": board_config.to_dict(),
         "tcp_frame_assumption": "tool_flange",
         "poses_file": str(poses_path) if poses_path is not None else None,
-        "world_from_board": world_from_board.tolist() if world_from_board is not None else None,
         "cameras": {},
     }
 
-    for target in targets:
-        results["cameras"][target.role] = _build_camera_result(target, world_from_board)
+    wrist_transforms: dict[str, np.ndarray | None] = {}
+    for target in wrist_targets:
+        wrist_result, flange_from_camera = _build_wrist_camera_result(target)
+        wrist_transforms[target.role] = flange_from_camera
+        results["cameras"][target.role] = wrist_result
+
+    if scene_targets:
+        reference_wrist_target = _select_reference_wrist_target(
+            wrist_targets,
+            str(args.reference_wrist_role).strip() or None,
+        )
+        results["reference_wrist_role"] = reference_wrist_target.role
+        results["coordinate_frame"] = f"{reference_wrist_target.attached_to}_base"
+        for target in scene_targets:
+            results["cameras"][target.role] = _build_scene_camera_result(
+                target=target,
+                reference_wrist_target=reference_wrist_target,
+                reference_flange_from_camera=wrist_transforms.get(reference_wrist_target.role),
+            )
 
     output_path = Path(args.output_file).expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)

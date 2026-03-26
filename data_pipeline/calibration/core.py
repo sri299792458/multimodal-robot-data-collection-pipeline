@@ -225,9 +225,8 @@ def calibrate_hand_eye(
     if len(base_to_flange_transforms) < 3:
         return {"success": False, "error": "Need at least 3 pose pairs for hand-eye calibration."}
 
-    gripper_to_base = [invert_transform(transform) for transform in base_to_flange_transforms]
-    rotation_gripper_to_base = [transform[:3, :3] for transform in gripper_to_base]
-    translation_gripper_to_base = [transform[:3, 3] for transform in gripper_to_base]
+    rotation_gripper_to_base = [transform[:3, :3] for transform in base_to_flange_transforms]
+    translation_gripper_to_base = [transform[:3, 3] for transform in base_to_flange_transforms]
     rotation_target_to_camera = [transform[:3, :3] for transform in target_to_camera_transforms]
     translation_target_to_camera = [transform[:3, 3] for transform in target_to_camera_transforms]
 
@@ -245,8 +244,7 @@ def calibrate_hand_eye(
 
     base_to_target_estimates: list[np.ndarray] = []
     for base_to_flange, target_to_camera in zip(base_to_flange_transforms, target_to_camera_transforms):
-        camera_to_target = invert_transform(target_to_camera)
-        base_to_target_estimates.append(base_to_flange @ flange_from_camera @ camera_to_target)
+        base_to_target_estimates.append(base_to_flange @ flange_from_camera @ target_to_camera)
     mean_base_to_target = average_transforms(base_to_target_estimates)
     spread = _transform_spread(base_to_target_estimates, mean_base_to_target)
 
@@ -262,6 +260,45 @@ def calibrate_hand_eye(
         "target_pose_consistency": {
             "reference_frame": "robot_base",
             "mean_transform": mean_base_to_target.tolist(),
+            **spread,
+        },
+    }
+    if reprojection_errors_px:
+        result["reprojection_error_mean_px"] = float(np.mean(reprojection_errors_px))
+        result["reprojection_error_std_px"] = float(np.std(reprojection_errors_px))
+    return result
+
+
+def calibrate_scene_camera_from_reference(
+    *,
+    base_to_target_transforms: list[np.ndarray],
+    target_to_camera_transforms: list[np.ndarray],
+    reprojection_errors_px: list[float] | None = None,
+    reference_frame: str,
+    reference_camera_role: str,
+) -> dict[str, Any]:
+    if len(base_to_target_transforms) != len(target_to_camera_transforms):
+        raise ValueError("base_to_target_transforms and target_to_camera_transforms must have the same length.")
+    if not base_to_target_transforms:
+        return {"success": False, "error": "Need at least 1 matched pose pair for scene calibration."}
+
+    base_to_camera_estimates = [
+        np.asarray(base_to_target, dtype=np.float64).reshape(4, 4) @ invert_transform(target_to_camera)
+        for base_to_target, target_to_camera in zip(base_to_target_transforms, target_to_camera_transforms)
+    ]
+    mean_base_to_camera = average_transforms(base_to_camera_estimates)
+    spread = _transform_spread(base_to_camera_estimates, mean_base_to_camera)
+
+    result = {
+        "success": True,
+        "reference_frame": reference_frame,
+        "reference_camera_role": reference_camera_role,
+        "num_samples": len(base_to_camera_estimates),
+        "rotation_matrix": mean_base_to_camera[:3, :3].tolist(),
+        "translation_vector": mean_base_to_camera[:3, 3].tolist(),
+        "rotation_vector": matrix_to_rotvec(mean_base_to_camera[:3, :3]).tolist(),
+        "base_to_camera_samples": {
+            "mean_transform": mean_base_to_camera.tolist(),
             **spread,
         },
     }

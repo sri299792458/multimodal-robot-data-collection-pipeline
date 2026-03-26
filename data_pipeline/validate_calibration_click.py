@@ -59,7 +59,7 @@ def _pixel_to_camera(u: int, v: int, depth_m: float, intrinsics) -> np.ndarray:
     return np.asarray([x, y, z], dtype=np.float64)
 
 
-def _world_from_camera_transform(role: str, calibration_entry: dict, arm_handle: CalibrationArm | None) -> np.ndarray:
+def _reference_from_camera_transform(role: str, calibration_entry: dict, arm_handle: CalibrationArm | None) -> tuple[np.ndarray, str]:
     camera_parts = camera_path_parts_for_role(role)
     if camera_parts is None:
         raise ValueError(f"Role {role} is not a camera role.")
@@ -69,7 +69,7 @@ def _world_from_camera_transform(role: str, calibration_entry: dict, arm_handle:
         transform = np.eye(4, dtype=np.float64)
         transform[:3, :3] = np.asarray(extrinsics["rotation_matrix"], dtype=np.float64)
         transform[:3, 3] = np.asarray(extrinsics["translation_vector"], dtype=np.float64)
-        return transform
+        return transform, str(extrinsics.get("reference_frame", "reference"))
 
     if arm_handle is None:
         raise RuntimeError(f"Wrist camera {role} requires a live robot connection.")
@@ -78,7 +78,7 @@ def _world_from_camera_transform(role: str, calibration_entry: dict, arm_handle:
     flange_from_camera[:3, :3] = np.asarray(hand_eye["rotation_matrix"], dtype=np.float64)
     flange_from_camera[:3, 3] = np.asarray(hand_eye["translation_vector"], dtype=np.float64)
     base_from_flange = pose6d_to_transform(arm_handle.get_actual_tcp_pose())
-    return base_from_flange @ flange_from_camera
+    return base_from_flange @ flange_from_camera, f"{attachment}_base"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -133,11 +133,18 @@ def main() -> int:
             print(f"Pixel ({x}, {y}): no valid depth")
             return
         point_camera = _pixel_to_camera(x, y, depth_m, intrinsics)
-        world_from_camera = _world_from_camera_transform(args.camera_role, calibration_entry, arm_handle)
-        point_world = (world_from_camera[:3, :3] @ point_camera) + world_from_camera[:3, 3]
+        reference_from_camera, reference_frame = _reference_from_camera_transform(
+            args.camera_role,
+            calibration_entry,
+            arm_handle,
+        )
+        point_reference = (reference_from_camera[:3, :3] @ point_camera) + reference_from_camera[:3, 3]
         print(f"Pixel ({x}, {y}) depth={depth_m:.4f} m")
         print(f"Camera point: [{point_camera[0]:.4f}, {point_camera[1]:.4f}, {point_camera[2]:.4f}]")
-        print(f"Calibrated point: [{point_world[0]:.4f}, {point_world[1]:.4f}, {point_world[2]:.4f}]")
+        print(
+            f"Calibrated point ({reference_frame}): "
+            f"[{point_reference[0]:.4f}, {point_reference[1]:.4f}, {point_reference[2]:.4f}]"
+        )
         if arm_handle is not None:
             tcp_pose = arm_handle.get_actual_tcp_pose()
             print(

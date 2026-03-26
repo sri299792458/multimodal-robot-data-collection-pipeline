@@ -2134,7 +2134,6 @@
 
 - Added a first-class V2 calibration workflow under `data_pipeline/`:
   - `record_calibration_poses.py`
-  - `compute_world_board.py`
   - `calibrate_rig.py`
   - `validate_calibration_click.py`
   - `data_pipeline/calibration/`
@@ -2142,7 +2141,13 @@
   - `sensors.local.yaml` for local rig identity and canonical roles
   - `calibration.local.json` for solved intrinsics / extrinsics / hand-eye results
 - Wrist-camera calibration uses ChArUco observations plus UR `getActualTCPPose()` and explicitly assumes the active UR TCP is the tool flange.
-- Static scene-camera calibration uses a direct measured `T_world_board` path rather than chaining through a wrist camera.
+- Scene-camera calibration now follows the full Raiden-style automatic path:
+  - record pose-driven wrist and scene observations together
+  - solve wrist hand-eye
+  - infer the board pose in the reference wrist arm base frame
+  - solve scene extrinsics in that same arm-base frame
+- Preserved the earlier manual-probing `T_world_board` variant on the local branch:
+  - `calibration-manual-probing`
 - `record_episode.py` now snapshots the active solved calibration into raw manifests when `data_pipeline/configs/calibration.local.json` exists or `--calibration-file` is provided.
 - Each manifest now records:
   - `sensors.sensors_file`

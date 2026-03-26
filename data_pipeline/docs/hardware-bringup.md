@@ -127,7 +127,6 @@ Use:
 
 The important output files are:
 
-- `data_pipeline/configs/world_board.local.json`
 - `data_pipeline/configs/calibration_poses.local.json`
 - `data_pipeline/configs/calibration.local.json`
 
