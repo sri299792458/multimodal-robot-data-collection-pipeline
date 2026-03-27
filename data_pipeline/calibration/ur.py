@@ -4,9 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 import sys
 
-import rtde_control
-import rtde_receive
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TELEOP_ROOT = REPO_ROOT / "TeleopSoftware"
@@ -14,6 +11,7 @@ if str(TELEOP_ROOT) not in sys.path:
     sys.path.insert(0, str(TELEOP_ROOT))
 
 from teleop_runtime_config import build_default_runtime_config  # type: ignore  # noqa: E402
+from UR.ur_adapters import URArmConnectionConfig, URControlAdapter, URStateAdapter  # type: ignore  # noqa: E402
 
 
 _DISPLAY_TO_CANONICAL = {
@@ -52,8 +50,13 @@ def load_arm_connection_info(active_arms: list[str] | tuple[str, ...] | None = N
 class CalibrationArm:
     def __init__(self, arm_info: ArmConnectionInfo, *, connect_control: bool = True):
         self.arm_info = arm_info
-        self.state = rtde_receive.RTDEReceiveInterface(arm_info.ip_address)
-        self.control = rtde_control.RTDEControlInterface(arm_info.ip_address, 500.0) if connect_control else None
+        connection = URArmConnectionConfig(
+            name=arm_info.display_name,
+            ip_address=arm_info.ip_address,
+            enable_gripper=False,
+        )
+        self.state = URStateAdapter.connect(connection)
+        self.control = URControlAdapter.connect(connection) if connect_control else None
 
     def get_actual_q(self) -> list[float]:
         return [float(value) for value in self.state.getActualQ()]

@@ -101,6 +101,9 @@ class URControlAdapter:
     def speedStop(self):
         return self._client.speedStop()
 
+    def stopScript(self):
+        return self._client.stopScript()
+
     def getJointTorques(self):
         return self._client.getJointTorques()
 
