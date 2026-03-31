@@ -149,15 +149,17 @@ This means the archive bag is expected to use:
 
 ## Current Local Environment
 
-The required ROS Jazzy packages exist in apt but are not currently installed on
-this machine:
+This machine now has the required ROS Jazzy image transport plugins installed:
 
+- `ros-jazzy-image-transport-plugins`
 - `ros-jazzy-compressed-image-transport`
 - `ros-jazzy-compressed-depth-image-transport`
-- or the meta-package `ros-jazzy-image-transport-plugins`
 
-So the spec assumes these plugins will be installed as part of the archive
-pipeline work.
+The current archive tool should assume these transports are available:
+
+- `raw`
+- `compressed`
+- `compressedDepth`
 
 
 ## Archive Pipeline Order
@@ -226,6 +228,10 @@ property is:
 
 - archive bag uses MCAP zstd chunk compression
 
+The current implementation uses a conservative playback-start delay before the
+offline transcode pass, because the image transport graph needs time to settle
+before the source bag starts publishing.
+
 Preset selection should be benchmarked during implementation, but the design
 target is already fixed:
 
@@ -252,6 +258,7 @@ Minimum required fields:
 - source capture bag size
 - source capture bag content fingerprint if available
 - whether the source bag was verified successfully
+- final archive bag verification result
 - trim basis:
   - teleop command topics
   - teleop-active topic

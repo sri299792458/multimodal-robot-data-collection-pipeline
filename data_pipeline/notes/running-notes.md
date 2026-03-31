@@ -2179,3 +2179,28 @@
   - lossless image transcode settings
   - final MCAP zstd compression settings
   - output artifact size/path
+
+### Offline archive tool
+
+- Installed the ROS Jazzy image transport plugins needed for offline archive transcode:
+  - `ros-jazzy-image-transport-plugins`
+  - `compressed`
+  - `compressedDepth`
+- Added [archive_episode.py](/home/srinivas/Desktop/pipeline/data_pipeline/archive_episode.py) as the offline archive builder.
+- The archive flow now:
+  - verifies the preserved capture bag
+  - computes offline head/tail trim from teleop command activity
+  - republishes image topics through ROS image transport
+  - merges compressed image topics with passthrough non-image topics into a final MCAP archive bag
+  - records provenance and verification in `archive/archive_manifest.json`
+- The image transcode step currently uses:
+  - RGB/tactile: `compressed` with PNG
+  - depth: `compressedDepth` with PNG
+- Synthetic validation now passes end-to-end:
+  - capture bag: `1240` messages
+  - archive bag: `1240` messages
+- Real-bag validation also passed on [episode-20260321-222420](/home/srinivas/Desktop/pipeline/raw_episodes/episode-20260321-222420):
+  - capture bag: `500,448,458` bytes, `13,299` messages
+  - archive bag: `106,070,231` bytes, `13,299` messages
+  - preserved all four image streams as compressed archive topics
+- The image-transport graph needed a conservative playback-start delay for reliable startup, so the archive tool now defaults that settle delay to `5.0s`.

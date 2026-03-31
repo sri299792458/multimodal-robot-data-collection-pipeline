@@ -8,6 +8,8 @@ V2 is the authoritative target contract. The codebase is still mid-migration tow
 
 The raw bag storage decision lives in [docs/raw-storage.md](./docs/raw-storage.md).
 
+The offline archive-bag design lives in [docs/archive-bag.md](./docs/archive-bag.md).
+
 For a generic bring-up sequence, use [docs/hardware-bringup.md](./docs/hardware-bringup.md).
 
 For the current exact Lightning-only command sequence on this machine, use [docs/current-lightning-gelsight-runbook.md](./docs/current-lightning-gelsight-runbook.md).
@@ -216,6 +218,26 @@ If the selected profile declares `published_depth`, the converter also writes a 
 
 - `published/<dataset_id>/depth/`
 - `published/<dataset_id>/meta/depth_info.json`
+
+## Offline Archive
+
+Create a storage-optimized archive bag from one preserved capture bag:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source .venv/bin/activate
+python data_pipeline/archive_episode.py raw_episodes/<episode_id>
+```
+
+The archive step:
+
+- keeps the source capture bag unchanged
+- computes head/tail trim offline
+- writes lossless image-transport topics:
+  - RGB/tactile as `/compressed` with PNG
+  - depth as `/compressedDepth` with PNG
+- writes the final archive bag as MCAP with zstd chunk compression
+- records provenance in `raw_episodes/<episode_id>/archive/archive_manifest.json`
 
 ## Standing Eval
 
