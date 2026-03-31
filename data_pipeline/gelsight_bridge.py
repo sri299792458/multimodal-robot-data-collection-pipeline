@@ -20,7 +20,8 @@ from sensor_msgs.msg import Image
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-GSROBOTICS_ROOT = REPO_ROOT / "gsrobotics"
+WORKSPACE_ROOT = REPO_ROOT.parent
+GSROBOTICS_ROOT = WORKSPACE_ROOT / "gsrobotics"
 
 if str(GSROBOTICS_ROOT) not in sys.path:
     sys.path.insert(0, str(GSROBOTICS_ROOT))

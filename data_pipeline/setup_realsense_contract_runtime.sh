@@ -3,8 +3,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
 SYSTEM_PYTHON="/usr/bin/python3"
-UPSTREAM_LIBREALSENSE_DIR="${ROOT_DIR}/librealsense"
+UPSTREAM_LIBREALSENSE_DIR="${WORKSPACE_ROOT}/librealsense"
 WORKTREE_DIR="${ROOT_DIR}/librealsense-v2.54.2"
 BUILD_DIR="${ROOT_DIR}/build/librealsense-v2.54.2"
 RELEASE_DIR="${BUILD_DIR}/Release"

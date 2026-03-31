@@ -44,6 +44,8 @@ Current implementation note:
 
 ## 0. One-Time Setup
 
+Before running the setup commands below on a new machine, create the sibling workspace layout described in [workspace-setup.md](./workspace-setup.md).
+
 Run these once from the repository root:
 
 ```bash

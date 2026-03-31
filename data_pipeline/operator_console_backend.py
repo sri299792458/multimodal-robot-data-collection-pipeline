@@ -21,6 +21,7 @@ from typing import Any
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_ROOT = REPO_ROOT.parent
 import sys
 
 if str(REPO_ROOT) not in sys.path:
@@ -49,7 +50,7 @@ CAPTURE_PLAN_DIR = STATE_DIR / "capture_plans"
 SESSION_PROFILES_DIR = STATE_DIR / "session_profiles"
 SETTINGS_PATH = STATE_DIR / "settings.yaml"
 TOPIC_PROBE_SCRIPT = REPO_ROOT / "data_pipeline" / "ros_topic_probe.py"
-VIEWER_REPO = REPO_ROOT / "lerobot-dataset-visualizer"
+VIEWER_REPO = WORKSPACE_ROOT / "lerobot-dataset-visualizer"
 VIEWER_BUN = Path.home() / ".bun" / "bin" / "bun"
 BUILTIN_SESSION_PROFILE_NAME = "init"
 DEFAULT_VIEWER_BASE_URL = os.environ.get("PIPELINE_VIEWER_BASE_URL", "http://localhost:3000").strip().rstrip("/")

@@ -3,12 +3,19 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
 VENV_DIR="${ROOT_DIR}/.venv"
+LEROBOT_DIR="${WORKSPACE_ROOT}/lerobot"
 PYTHON_BIN="/usr/bin/python3"
 BOOTSTRAP_PYTHON="${PYTHON:-python}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Missing ${PYTHON_BIN}" >&2
+  exit 1
+fi
+
+if [[ ! -d "${LEROBOT_DIR}/.git" ]]; then
+  echo "Missing lerobot checkout at ${LEROBOT_DIR}" >&2
   exit 1
 fi
 
@@ -32,7 +39,7 @@ fi
 "${VENV_DIR}/bin/python" -m pip install --upgrade pip "setuptools<80" wheel
 "${VENV_DIR}/bin/python" -m pip install -r "${ROOT_DIR}/data_pipeline/requirements-converter.txt"
 "${VENV_DIR}/bin/python" -m pip install torch==2.6.0 torchvision==0.21.0
-"${VENV_DIR}/bin/python" -m pip install --no-deps -e "${ROOT_DIR}/lerobot"
+"${VENV_DIR}/bin/python" -m pip install --no-deps -e "${LEROBOT_DIR}"
 
 echo "Converter environment ready at ${VENV_DIR}"
 echo "Activate with: source ${VENV_DIR}/bin/activate"
