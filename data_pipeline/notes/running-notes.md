@@ -2274,3 +2274,14 @@
   - but it is a real part of the local inspection workflow
   - `Open Viewer` still owns runtime startup, while the setup script prepares the toolchain and production bundle
 - Tightened [system-setup.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/system-setup.md) so it no longer implies `bun` is already handled elsewhere without a documented setup path.
+
+### Explicit ROS Jazzy install docs
+
+- Updated [system-setup.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/system-setup.md) to include the apt-based ROS 2 Jazzy install path directly instead of only assuming ROS was already present.
+- The page now makes the platform contract explicit:
+  - Ubuntu Noble 24.04
+  - apt-installed ROS at `/opt/ros/jazzy`
+  - `ros-jazzy-desktop` as the documented default install
+- Also tightened the RealSense wording there so it now clearly means:
+  - the pipeline does not primarily depend on `realsense2_camera`
+  - the pipeline does not treat an arbitrary system `librealsense` version as the RealSense runtime contract

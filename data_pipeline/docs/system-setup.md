@@ -5,17 +5,44 @@ before creating the Python environment or bringing up hardware.
 
 The current target platform is:
 
-- Ubuntu with ROS 2 Jazzy installed under `/opt/ros/jazzy`
+- Ubuntu Noble 24.04 with ROS 2 Jazzy installed under `/opt/ros/jazzy`
 
-This page does not replace the official ROS installation instructions. It
-assumes ROS Jazzy itself is already installed and that this command works:
+## Install ROS 2 Jazzy
+
+Use the official Ubuntu deb installation path for ROS 2 Jazzy.
+
+Reference:
+
+- https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html
+
+The pipeline expects the apt-installed ROS environment under:
+
+- `/opt/ros/jazzy`
+
+If ROS Jazzy is not installed yet, use the official repository setup and then
+install the desktop variant:
+
+```bash
+sudo apt install software-properties-common
+sudo add-apt-repository universe
+sudo apt update && sudo apt install curl -y
+export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F'"' '{print $4}')
+curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb"
+sudo dpkg -i /tmp/ros2-apt-source.deb
+sudo apt update
+sudo apt upgrade
+sudo apt install ros-jazzy-desktop
+```
+
+After that, this command should work:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 ros2 --help
 ```
 
-If that command fails, install ROS 2 Jazzy first and then return here.
+If you prefer the smaller base install, `ros-jazzy-ros-base` also works, but
+the docs and validation flow assume the desktop install.
 
 ## Core Ubuntu Packages
 
@@ -68,9 +95,10 @@ What these are for:
 - `ros-jazzy-rosbag2-storage-mcap`
   - required because raw capture bags default to `mcap`
 
-## What We Are Not Using As The Main Path
+## Primary RealSense Runtime Contract
 
-Do not treat these as the main runtime contract for this pipeline:
+For the RealSense capture path, do not document or debug this pipeline as if it
+primarily depends on:
 
 - the ROS `realsense2_camera` wrapper
 - a random system `librealsense` version
