@@ -2208,3 +2208,22 @@
 ### USB helper
 
 - Moved the local USB port-mapping helper to [helpers/watch_usb_ports.py](/home/srinivas/Desktop/pipeline/data_pipeline/helpers/watch_usb_ports.py) so it sits with other non-core utilities instead of at the package root.
+
+### Archive verification hardening
+
+- Added [archive_verification.py](/home/srinivas/Desktop/pipeline/data_pipeline/archive_verification.py) as shared verification logic for archive bags.
+- Added [verify_archive_bag.py](/home/srinivas/Desktop/pipeline/data_pipeline/verify_archive_bag.py) as a standalone verifier with:
+  - lightweight per-bag structure checks
+  - optional full payload round-trip verification
+- Fixed the RGB archive transcode path to use PNG at republisher startup instead of silently falling back to JPEG.
+- Fixed the depth archive transcode path to preserve the full `uint16` range by configuring `compressedDepth` startup parameters with:
+  - PNG format
+  - `depth_max = 65.535`
+- Confirmed from upstream plugin behavior that `compressedDepth` for `16UC1` clips values above `depth_max * 1000` after casting to `uint16_t`, so `65.535` is the correct lossless-safe upper bound.
+- Increased the post-playback drain in the archive builder to `2.0s` so the recorder does not drop the final compressed image on shutdown.
+- Verified exact round-trip payload equality on:
+  - synthetic archive bag `archive-smoke-001`
+  - real archive bag [episode-20260321-222420](/home/srinivas/Desktop/pipeline/raw_episodes/episode-20260321-222420)
+- The real bag now passes both verification levels:
+  - lightweight verification: `ok`
+  - full payload verification: `ok`

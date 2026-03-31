@@ -36,6 +36,10 @@ from data_pipeline.pipeline_utils import (  # noqa: E402
     read_bag_metadata,
     write_json,
 )
+from data_pipeline.archive_verification import (  # noqa: E402
+    ArchiveImageTopicPair,
+    verify_archive_structure,
+)
 
 
 IMAGE_TOPIC_TYPE = "sensor_msgs/msg/Image"
@@ -46,6 +50,8 @@ DEFAULT_TRIM_PAD_AFTER_S = 1.0
 DEFAULT_ARCHIVE_DIRNAME = "archive"
 DEFAULT_ARCHIVE_ZSTD_PRESET = "zstd_small"
 DEFAULT_PLAYBACK_START_DELAY_S = 5.0
+POST_PLAYBACK_DRAIN_S = 2.0
+ARCHIVE_DEPTH_MAX_M = 65.535
 
 
 @dataclass(frozen=True)
@@ -559,6 +565,31 @@ def choose_domain_id(requested: int) -> int:
     return random.randint(120, 220)
 
 
+def write_republisher_params_file(plan: ImageTopicPlan, logs_dir: Path) -> Path | None:
+    if plan.modality == "rgb":
+        params_text = (
+            f"/{plan.node_name}/{plan.node_name}:\n"
+            "  ros__parameters:\n"
+            '    ".out.compressed.format": png\n'
+            '    ".out.format": png\n'
+        )
+    elif plan.modality == "depth":
+        params_text = (
+            f"/{plan.node_name}/{plan.node_name}:\n"
+            "  ros__parameters:\n"
+            f'    ".out.compressedDepth.depth_max": {ARCHIVE_DEPTH_MAX_M}\n'
+            '    ".out.compressedDepth.format": png\n'
+            f'    ".out.depth_max": {ARCHIVE_DEPTH_MAX_M}\n'
+            '    ".out.format": png\n'
+        )
+    else:
+        return None
+
+    params_path = logs_dir / f"{plan.node_name}.params.yaml"
+    params_path.write_text(params_text, encoding="utf-8")
+    return params_path
+
+
 def run_image_transport_transcode(
     source_bag_dir: Path,
     source_storage_id: str,
@@ -581,6 +612,7 @@ def run_image_transport_transcode(
     processes: list[ManagedProcess] = []
     try:
         for plan in image_plans:
+            params_path = write_republisher_params_file(plan, logs_dir)
             cmd = [
                 ros2,
                 "run",
@@ -598,8 +630,8 @@ def run_image_transport_transcode(
                 "-r",
                 f"in:={plan.source_topic}",
             ]
-            if plan.modality == "rgb":
-                cmd.extend(["-p", "format:=png"])
+            if params_path is not None:
+                cmd.extend(["--params-file", str(params_path)])
             processes.append(
                 spawn_logged_process(
                     plan.node_name,
@@ -608,6 +640,9 @@ def run_image_transport_transcode(
                     log_path=logs_dir / f"{plan.node_name}.log",
                 )
             )
+
+        time.sleep(1.0)
+        ensure_processes_alive(processes)
 
         record_topics = [plan.intermediate_topic for plan in image_plans]
         recorder_cmd = [
@@ -662,7 +697,7 @@ def run_image_transport_transcode(
         if player_exit_code != 0:
             raise RuntimeError(f"ros2 bag play failed with exit code {player_exit_code}. See {player.log_path}")
 
-        time.sleep(1.0)
+        time.sleep(POST_PLAYBACK_DRAIN_S)
         ensure_processes_alive(processes)
 
         recorder_exit_code = stop_managed_process(recorder)
@@ -856,8 +891,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     archive_manifest["archive_output"]["size_bytes"] = final_copy_stats["size_bytes"]
     archive_manifest["archive_output"]["message_count"] = final_copy_stats["message_count"]
-    archive_manifest["archive_output"]["verified"] = True
-    archive_manifest["archive_output"]["verification"] = verify_capture_bag(archive_bag_dir, "mcap")
+    archive_manifest["archive_output"]["verification"] = verify_archive_structure(
+        playback_source_bag_dir,
+        playback_storage_id,
+        archive_bag_dir,
+        "mcap",
+        passthrough_topics,
+        [
+            ArchiveImageTopicPair(
+                source_topic=plan.source_topic,
+                archive_topic=plan.output_topic,
+                modality=plan.modality,
+            )
+            for plan in image_plans
+        ],
+    )
+    archive_manifest["archive_output"]["verified"] = (
+        archive_manifest["archive_output"]["verification"]["status"] == "ok"
+    )
+    if not archive_manifest["archive_output"]["verified"]:
+        write_json(archive_manifest_path, archive_manifest)
+        raise RuntimeError(
+            "Lightweight archive verification failed: "
+            f"{archive_manifest['archive_output']['verification']['errors']}"
+        )
     write_json(archive_manifest_path, archive_manifest)
 
     if not args.keep_temp:

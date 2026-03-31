@@ -323,6 +323,43 @@ Before the archive path is adopted, it must prove:
 - published conversion from the capture bag remains unchanged
 
 
+## Verification Model
+
+Archive confidence should come from two levels of verification.
+
+### Per archive bag
+
+Every archive bag should get lightweight structural verification.
+
+This verifies:
+
+- expected archive topic inventory
+- passthrough topic counts
+- image-topic counts
+- image header-stamp correspondence
+
+This is the default archive-time verification recorded into
+`archive_manifest.json`.
+
+### After archive-code changes and periodic spot checks
+
+We also need exact payload round-trip verification on representative bags.
+
+This verifies:
+
+- raw RGB/tactile image bytes match decoded archive PNG bytes exactly
+- raw depth image bytes match decoded `compressedDepth/png` bytes exactly
+
+This does not need to run on every bag by default, but it must be rerun when:
+
+- archive transcode logic changes
+- image-transport parameterization changes
+- codec policy changes
+
+It is also the right stronger check before trusting capture-bag deletion
+policy.
+
+
 ## Capture Bag Deletion Policy
 
 The archive bag is the intended long-term ROS storage artifact.
