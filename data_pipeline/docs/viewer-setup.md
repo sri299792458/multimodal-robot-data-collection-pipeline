@@ -64,24 +64,8 @@ What the setup script does is only prepare the viewer toolchain and production
 build so that `Open Viewer` does not fail due to missing `bun` or a missing
 production bundle.
 
-## Important Note About Local Probes
-
-On this machine we learned that proxy environment variables can break local
-viewer probes in misleading ways.
-
-So the runtime launch path strips:
-
-- `http_proxy`
-- `https_proxy`
-- `HTTP_PROXY`
-- `HTTPS_PROXY`
-- `ALL_PROXY`
-- `all_proxy`
-- `NO_PROXY`
-- `no_proxy`
-
-The setup script does not need to do that for the build step, but the runtime
-launch path still does.
+You do not need to manage the local proxy/runtime quirks manually during normal
+use. The operator console's `Open Viewer` path already handles those at runtime.
 
 ## Next Step
 

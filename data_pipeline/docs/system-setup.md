@@ -41,9 +41,6 @@ source /opt/ros/jazzy/setup.bash
 ros2 --help
 ```
 
-If you prefer the smaller base install, `ros-jazzy-ros-base` also works, but
-the docs and validation flow assume the desktop install.
-
 ## Core Ubuntu Packages
 
 Install the base system packages used by the current pipeline:
