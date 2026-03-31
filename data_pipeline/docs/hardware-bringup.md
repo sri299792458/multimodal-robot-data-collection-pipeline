@@ -1,56 +1,28 @@
 # Hardware Bring-Up
 
-This is the step-by-step sequence for the first real capture run with the current V2 pipeline.
+This page is the normal bring-up flow for a new user on a fresh machine.
 
-For the current known-good Lightning-only command sequence on this machine, use [current-lightning-gelsight-runbook.md](./current-lightning-gelsight-runbook.md).
+The goal is simple:
 
-Use separate terminals. For ROS-facing processes, prefer system ROS Jazzy and `/usr/bin/python3`, not Conda Python.
+- get the hardware into a healthy operator-console state
+- confirm the expected `/spark/...` topic surface exists
+- stop before longer data collection work
 
-
-## Embodiment Decision
-
-Before you record, decide which arms and sensors this session will use:
-
-- `lightning` only
-- `thunder` only
-- `lightning` + `thunder`
-
-Before you convert, choose the published dataset folder this session should append into.
-
-Recommended published dataset naming:
-
-- Lightning-only:
-  - `spark_multisensor_lightning_v1`
-- Lightning-only with published tactile:
-  - `spark_multisensor_lightning_tactile_v1`
-- Thunder-only:
-  - `spark_multisensor_thunder_v1`
-- Bimanual:
-  - `spark_multisensor_bimanual_v1`
-
-Why:
-
-- raw bags may be recorded with one active arm or both
-- published LeRobot datasets should stay profile-homogeneous
-- single-arm and bimanual episodes should not be appended into the same published dataset
-- episodes with different published image fields, such as tactile vs no tactile, should not be appended into the same `dataset_id`
-
-Current implementation note:
-
-- the shipped default config file `data_pipeline/configs/multisensor_20hz.yaml` is still the bimanual profile
-- the recorder now requires explicit `--active-arms` and stamps the matching published profile into the raw manifest
-- the converter now defaults to the manifest-selected profile when `--profile` is omitted
+For the current exact Lightning-only command sequence validated on this machine,
+use [current-lightning-gelsight-runbook.md](./current-lightning-gelsight-runbook.md).
+That page is intentionally concrete and machine-specific. This page is the
+general bring-up contract.
 
 
-## 0. One-Time Setup
+## Before You Start
 
-Before running the setup commands below on a new machine, create the sibling workspace layout described in [workspace-setup.md](./workspace-setup.md).
+Finish these setup pages first:
 
-Also install the required Ubuntu and ROS packages from [system-setup.md](./system-setup.md).
+- [workspace-setup.md](./workspace-setup.md)
+- [system-setup.md](./system-setup.md)
+- [python-env-setup.md](./python-env-setup.md)
 
-Also create the shared local `.venv` described in [python-env-setup.md](./python-env-setup.md).
-
-Run these once from the repository root:
+Run the one-time project setup from the repository root:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -58,12 +30,121 @@ source /opt/ros/jazzy/setup.bash
 ./data_pipeline/setup_realsense_contract_runtime.sh
 ```
 
+Notes:
 
-## 1. Discover Device IDs
+- the Qt operator console now comes from the shared `.venv`
+- the RealSense capture path still depends on the pinned local
+  `librealsense v2.54.2` runtime prepared by
+  `setup_realsense_contract_runtime.sh`
+- the viewer is **not** required for hardware bring-up
 
-### RealSense serial numbers
 
-Then read the RealSense USB metadata directly:
+## 1. Physical Preflight
+
+Before launching anything, check the rig physically:
+
+- the UR arm or arms are powered and reachable on the network
+- remote control can be enabled on the robot if needed
+- the SPARK input device is connected
+- the foot pedal is connected and unpressed
+- the RealSense cameras you want for this session are attached
+- any GelSight devices you plan to record are attached
+
+If you are using multiple RealSense cameras, keep them on the intended USB
+controller layout. Do not assume that any two convenient ports are equivalent.
+
+
+## 2. Prepare `sensors.local.yaml`
+
+If you do not already have a local sensors file, create it:
+
+```bash
+cp data_pipeline/configs/sensors.example.yaml \
+  data_pipeline/configs/sensors.local.yaml
+```
+
+Then edit:
+
+- [sensors.local.yaml](/home/srinivas/Desktop/pipeline/data_pipeline/configs/sensors.local.yaml)
+
+Fill in the metadata you already know:
+
+- `sensor_id`
+- `attached_to`
+- `mount_site`
+- `calibration_ref`
+
+Important:
+
+- device discovery can help with live identifiers
+- it does **not** replace the sensors file as the inventory record
+- this file is what makes raw episodes remappable later if published naming or
+  calibration references change
+
+If this is a new camera setup or the rig has changed, plan to run:
+
+- [calibration.md](./calibration.md)
+
+before serious data collection.
+
+
+## 3. Start The Operator Console
+
+From the repository root:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source .venv/bin/activate
+python data_pipeline/operator_console_qt.py
+```
+
+This is the normal bring-up surface now. Do not start with a pile of manual
+launch commands unless you are debugging.
+
+
+## 4. Discover Devices
+
+In the operator console:
+
+1. confirm `Sensors File` points at `data_pipeline/configs/sensors.local.yaml`
+2. set `Active Arms` for this session
+3. click `Discover Devices`
+
+The `Session Devices` table should populate with discovered hardware only.
+
+Expected device kinds include:
+
+- `realsense`
+- `gelsight`
+
+Use the table to decide which devices are part of this session:
+
+- check `Record` for devices you want
+- leave `Record` unchecked for devices you do not want
+- assign the correct `Role`
+
+Typical role choices are:
+
+- RealSense:
+  - `lightning_wrist_1`
+  - `scene_1`
+  - `scene_2`
+- GelSight:
+  - `lightning_finger_left`
+  - `lightning_finger_right`
+  - `thunder_finger_left`
+  - `thunder_finger_right`
+
+The operator should not need to type raw serial numbers or V4L paths into the
+main workflow if discovery is working.
+
+
+## 5. If Discovery Looks Wrong
+
+If a device is missing or ambiguous, use these fallback probes in a separate
+terminal.
+
+### RealSense fallback
 
 ```bash
 for path in /sys/bus/usb/devices/*; do
@@ -77,319 +158,155 @@ for path in /sys/bus/usb/devices/*; do
 done
 ```
 
-Record the two serials you want to use as:
+Notes:
 
-- `WRIST_SERIAL`
-- `SCENE_SERIAL`
+- the local `librealsense v2.54.2` runtime may report the L515 serial in
+  shortened lowercase hex form such as `f1380660`
+- the bridge normalizes the raw USB serial and runtime serial, so either the
+  full USB serial or the shortened runtime serial is acceptable
 
-Note:
-
-- the local `librealsense v2.54.2` runtime may report the L515 serial in shortened lowercase hex form such as `f1380660`
-- the bridge now normalizes the raw USB serial and the runtime serial, so either `00000000F1380660` or `f1380660` is acceptable at launch
-
-### GelSight device paths
-
-List V4L camera symlinks and device names:
+### GelSight fallback
 
 ```bash
 ls -l /dev/v4l/by-id
 v4l2-ctl --list-devices
 ```
 
-If two GelSight devices are attached, record the two paths you want to use as:
+If names are ambiguous, unplug one GelSight, list again, then plug it back in.
 
-- `LEFT_GELSIGHT_DEV`
-- `RIGHT_GELSIGHT_DEV`
-
-If only one GelSight device is attached, record just one path and launch a single tactile bridge in step 6.
-
-If the names are ambiguous, unplug one GelSight, list again, then plug it back in and repeat.
+After you resolve the identifiers, return to the operator console and click
+`Discover Devices` again.
 
 
-## 2. Fill In Sensor Metadata
+## 6. Start The Session
 
-Copy the example file and replace the placeholder serials/calibration refs:
+Once the device table looks correct, click:
 
-```bash
-cp data_pipeline/configs/sensors.example.yaml data_pipeline/configs/sensors.local.yaml
-```
+- `Start Session`
 
-Edit `data_pipeline/configs/sensors.local.yaml` and fill in the real values you know.
+That starts the current managed bring-up stack:
 
-Notes:
+- `SPARK Devices`
+- `Teleop GUI`
+- `RealSense`
+- `GelSight` if one or more tactile devices are enabled
 
-- RealSense serial numbers are also inferred from the running node parameters.
-- GelSight serial numbers are not inferred automatically, so put the real values in this file if you have them.
-- Fill in `sensor_id`, `attached_to`, and `mount_site` as well. Those fields are what make the raw episode remappable later if published naming changes.
+This is the intended default path. The backend is assembling the same launch
+commands you would otherwise type manually:
 
-
-## 2.5. Calibrate Cameras
-
-If you want solved camera geometry in the raw manifests, run the calibration workflow before recording.
-
-Use:
-
-- [calibration.md](./calibration.md)
-
-The important output files are:
-
-- `data_pipeline/configs/calibration_poses.local.json`
-- `data_pipeline/configs/calibration.local.json`
-
-`record_episode.py` will automatically snapshot `calibration.local.json` into each raw manifest when that file exists.
+- `TeleopSoftware/launch_devs.py`
+- `TeleopSoftware/launch.py`
+- `ros2 launch data_pipeline/launch/realsense_contract.launch.py ...`
+- `ros2 launch data_pipeline/launch/gelsight_contract.launch.py ...`
 
 
-## 3. Start The Teleop Input Devices
+## 7. Finish Robot Connection In The Teleop GUI
 
-If you are using SPARK, SpaceMouse, or VR inputs, start the legacy device launcher:
+After `Start Session`, the Teleop GUI process should appear.
 
-```bash
-source /opt/ros/jazzy/setup.bash
-.venv/bin/python TeleopSoftware/launch_devs.py
-```
+Use that GUI to:
 
-Leave this running.
+- connect to the active UR arm or arms
+- enable the robot-side control mode you intend to record
+- verify the gripper path is alive
 
+One expected failure mode is:
 
-## 4. Start The Teleop GUI / Robot Runtime
+- `Please enable remote control on the robot!`
 
-In a new terminal:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-.venv/bin/python TeleopSoftware/launch.py
-```
-
-Use the GUI to connect to the UR arms and bring the system into the control mode you want to record.
-
-Notes:
-
-- The current local Teleop bring-up path still uses `.venv` because that environment contains the Teleop Python dependencies such as `ur_rtde`.
-- If the GUI logs `Please enable remote control on the robot!`, the dashboard connection succeeded but UR RTDE control was refused by the robot-side remote-control setting.
-
-Expected robot topics come from this process:
-
-- `/spark/lightning/robot/joint_state`
-- `/spark/lightning/robot/eef_pose`
-- `/spark/lightning/robot/tcp_wrench`
-- `/spark/lightning/robot/gripper_state`
-- `/spark/lightning/teleop/cmd_joint_state`
-- `/spark/lightning/teleop/cmd_gripper_state`
-- `/spark/thunder/robot/joint_state`
-- `/spark/thunder/robot/eef_pose`
-- `/spark/thunder/robot/tcp_wrench`
-- `/spark/thunder/robot/gripper_state`
-- `/spark/thunder/teleop/cmd_joint_state`
-- `/spark/thunder/teleop/cmd_gripper_state`
+That means the dashboard path succeeded but RTDE control was refused by the
+robot-side remote-control setting.
 
 
-## 5. Start The RealSense Contract Publishers
+## 8. Check Health In The Operator Console
 
-In a new terminal:
+The health cards are the primary readiness check.
 
-```bash
-source /opt/ros/jazzy/setup.bash
-ros2 launch data_pipeline/launch/realsense_contract.launch.py \
-  camera_specs:='lightning;wrist_1;<WRIST_SERIAL>;640,480,30;640,480,30|world;scene_1;<SCENE_SERIAL>;640,480,30;640,480,30'
-```
+Healthy bring-up usually looks like:
 
-Replace the placeholders with the serials from step 1.
+- `SPARK Devices`: green
+- `Teleop GUI`: green
+- `RealSense`: green if enabled
+- `GelSight`: green if enabled, otherwise off
 
-Expected topics:
+Some useful interpretations:
 
-- `/spark/cameras/lightning/wrist_1/color/image_raw`
-- `/spark/cameras/lightning/wrist_1/depth/image_rect_raw`
-- `/spark/cameras/world/scene_1/color/image_raw`
-- `/spark/cameras/world/scene_1/depth/image_rect_raw`
+- `SPARK Devices live but static`
+  - the process is running, but no angle changes were observed yet
+- `Teleop running; connect robot in Teleop GUI`
+  - the Teleop process exists, but the expected robot topics are not live yet
+- `RealSense disabled`
+  - no RealSense devices are enabled in the session table
+- `GelSight disabled`
+  - no GelSight devices are enabled in the session table
 
-This bridge uses `pyrealsense2` directly and stamps both color and depth images with host ROS time immediately after `wait_for_frames()` returns.
-The setup script builds and validates the local official `librealsense v2.54.2` runtime for system ROS Python, which is currently required for stable L515 support on this host.
-
-
-## 6. Start The GelSight Contract Publishers
-
-If you are using two tactile sensors, start them in another terminal:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-ros2 launch data_pipeline/launch/gelsight_contract.launch.py \
-  sensor_specs:='lightning;finger_left;<LEFT_GELSIGHT_DEV>|lightning;finger_right;<RIGHT_GELSIGHT_DEV>'
-```
-
-If you are using only one tactile sensor, launch only one side:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-ros2 launch data_pipeline/launch/gelsight_contract.launch.py \
-  sensor_specs:='lightning;finger_left;<LEFT_GELSIGHT_DEV>'
-```
-
-Expected topics when both are present:
-
-- `/spark/tactile/lightning/finger_left/color/image_raw`
-- `/spark/tactile/lightning/finger_right/color/image_raw`
-
-If only one side is present, you should see only the enabled topic. If tactile is not ready yet, skip this step. The profile allows optional tactile fields, but tactile and non-tactile episodes should still use separate published `dataset_id`s so the LeRobot feature schema stays homogeneous.
+At this stage, do **not** trust “the process started” as enough. The point of
+the operator console is that readiness is measured from live topics.
 
 
-## 7. Preflight Check The Topic Surface
+## 9. Click `Validate`
 
-In a new terminal:
+After the health cards look right, click:
+
+- `Validate`
+
+The validation output should not complain about missing required topics.
+
+For the enabled devices in this session, the expected topic surface should
+include:
+
+- `/spark/session/teleop_active`
+- `/spark/<arm>/robot/joint_state`
+- `/spark/<arm>/robot/eef_pose`
+- `/spark/<arm>/robot/tcp_wrench`
+- `/spark/<arm>/robot/gripper_state`
+- `/spark/<arm>/teleop/cmd_joint_state`
+- `/spark/<arm>/teleop/cmd_gripper_state`
+- `/spark/cameras/<attachment>/<slot>/color/image_raw`
+- `/spark/cameras/<attachment>/<slot>/depth/image_rect_raw`
+- `/spark/tactile/<arm>/<finger>/color/image_raw` when tactile is enabled
+
+
+## 10. Optional Manual Topic Checks
+
+If you want one more low-level check, use a ROS terminal:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 ros2 topic list | rg '^/spark/'
 ```
 
-Then spot-check a few topic rates:
+Then spot-check a few rates:
 
 ```bash
+ros2 topic hz /spark/session/teleop_active
+ros2 topic hz /spark/lightning/robot/joint_state
 ros2 topic hz /spark/cameras/lightning/wrist_1/color/image_raw
 ros2 topic hz /spark/cameras/world/scene_1/color/image_raw
-ros2 topic hz /spark/lightning/robot/joint_state
-ros2 topic hz /spark/thunder/robot/joint_state
-ros2 topic hz /spark/session/teleop_active
 ```
 
 If tactile is enabled, also check:
 
 ```bash
 ros2 topic hz /spark/tactile/lightning/finger_left/color/image_raw
-ros2 topic hz /spark/tactile/lightning/finger_right/color/image_raw
 ```
 
-Before recording, run the recorder dry-run:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-/usr/bin/python3 data_pipeline/record_episode.py \
-  --task-name pick_place \
-  --language-instruction "pick up the object and place it in the target area" \
-  --operator <operator_name> \
-  --active-arms <lightning|thunder|lightning,thunder> \
-  --sensors-file data_pipeline/configs/sensors.local.yaml \
-  --dry-run
-```
-
-This should print the selected topic list and should not fail with `Missing required topics`.
-
-The dry-run output now also prints:
-
-- `active_arms=...`
-- `mapping_profile=...`
-- `profile_path=...`
-- `language_instruction=...`
+Use these manual probes as confirmation or debugging help, not as the main
+operator workflow.
 
 
-## 8. Record One Short Real Episode
+## What Success Looks Like
 
-Do one short smoke-test recording before collecting anything longer:
+Hardware bring-up is complete when:
 
-```bash
-source /opt/ros/jazzy/setup.bash
-/usr/bin/python3 data_pipeline/record_episode.py \
-  --task-name pick_place \
-  --language-instruction "pick up the object and place it in the target area" \
-  --operator <operator_name> \
-  --active-arms <lightning|thunder|lightning,thunder> \
-  --sensors-file data_pipeline/configs/sensors.local.yaml
-```
+- the correct devices are discovered and assigned roles
+- `Start Session` brings up the expected services
+- the Teleop GUI is connected to the intended robot or robots
+- the required health cards are green
+- `Validate` passes without missing-topic errors
 
-Press `Ctrl+C` to stop after a short run.
+At that point, the rig is ready for a first smoke-test recording.
 
-The output episode directory will be:
+For the current known-good machine-specific record/convert/viewer sequence, use:
 
-```text
-raw_episodes/<episode_id>/
-```
-
-with:
-
-- `bag/`
-- `episode_manifest.json`
-- `notes.md`
-
-
-## 9. Inspect The Raw Episode
-
-Check the bag:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-ros2 bag info raw_episodes/<episode_id>/bag
-```
-
-Check the manifest:
-
-```bash
-sed -n '1,240p' raw_episodes/<episode_id>/episode_manifest.json
-```
-
-What to look for:
-
-- both RealSense serials are present
-- `recorded_topics` looks complete for the chosen profile
-- `capture.record_exit_code` is `0`
-- `capture.start_time_ns` and `capture.end_time_ns` are populated
-- `sensors.devices` entries look reasonable
-
-
-## 10. Convert The Episode To LeRobot
-
-In a converter terminal:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source .venv/bin/activate
-python data_pipeline/convert_episode_bag_to_lerobot.py \
-  raw_episodes/<episode_id> \
-  --published-root published
-```
-
-Expected output includes:
-
-- `status=pass` or `status=truncated_tail`
-- `published_frames=<n>`
-- `artifacts=published/<dataset_id>/meta/spark_conversion/<episode_id>`
-
-
-## 11. Validate The Real Episode In The Standing Eval Path
-
-```bash
-source .venv/bin/activate
-python data_pipeline/validate_eval_set.py \
-  --work-root /tmp/pipeline_eval_real \
-  --real-episode raw_episodes/<episode_id> \
-  --require-real \
-  --clean
-```
-
-This should leave a report at:
-
-```text
-/tmp/pipeline_eval_real/reports/evaluation_summary.json
-```
-
-
-## 12. If Something Fails
-
-Use these checks first:
-
-```bash
-ros2 topic list | rg '^/spark/'
-ros2 topic echo --once /spark/lightning/robot/joint_state
-ros2 topic echo --once /spark/cameras/lightning/wrist_1/color/image_raw
-ros2 topic echo --once /spark/cameras/world/scene_1/color/image_raw
-ros2 param dump /spark/cameras/lightning/wrist_1
-ros2 param dump /spark/cameras/world/scene_1
-```
-
-Common failure boundaries:
-
-- missing required `/spark/...` topics means one of the runtime processes is not up
-- RealSense failures with the official node usually mean:
-  - the wrong serial number was used,
-  - the upstream wrapper is not discovering that camera model on this host, or
-  - the node is up but not publishing the expected image topics
-- GelSight launch failures usually mean the wrong `/dev/v4l/by-id/...` path or camera access issues
-- converter failures after a good bag usually point to timestamp/rate/alignment issues that should be investigated from the saved diagnostics
+- [current-lightning-gelsight-runbook.md](./current-lightning-gelsight-runbook.md)

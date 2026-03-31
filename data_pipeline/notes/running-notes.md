@@ -2307,3 +2307,18 @@
   - [system-setup.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/system-setup.md)
   - [README.md](/home/srinivas/Desktop/pipeline/data_pipeline/README.md)
   - [hardware-bringup.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/hardware-bringup.md)
+
+### Hardware bring-up docs now match the operator-console workflow
+
+- Rewrote [hardware-bringup.md](/home/srinivas/Desktop/pipeline/data_pipeline/docs/hardware-bringup.md) so it no longer starts from a terminal-only launch sequence.
+- The page now treats the Qt operator console as the default bring-up surface:
+  - prepare `sensors.local.yaml`
+  - launch `operator_console_qt.py`
+  - `Discover Devices`
+  - assign `Record` and `Role`
+  - `Start Session`
+  - finish robot connection in the Teleop GUI
+  - check health cards
+  - `Validate`
+- Kept the low-level RealSense and GelSight identifier probes in the page, but moved them into a fallback section for when discovery looks wrong.
+- Deliberately stopped the page at “hardware is healthy and ready,” instead of mixing full recording, conversion, and viewer steps into the same document.
