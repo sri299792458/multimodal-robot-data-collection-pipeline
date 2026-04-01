@@ -112,6 +112,7 @@ Use the table to decide which devices are part of this session:
 - leave `Record` unchecked for devices you do not want
 - assign the correct sensor key
 - if needed, save the current sensor mapping with `Save As...` on `Sensors File`
+- if the dropdown does not already contain the key you need, use `Custom...` and enter a canonical sensor key such as `/spark/cameras/world/scene_4`
 
 Typical sensor keys are:
 

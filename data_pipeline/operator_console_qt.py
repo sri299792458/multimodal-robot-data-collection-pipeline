@@ -21,6 +21,7 @@ try:
         QGridLayout,
         QGroupBox,
         QHBoxLayout,
+        QInputDialog,
         QLabel,
         QLineEdit,
         QMainWindow,
@@ -63,6 +64,7 @@ STATUS_STYLES = {
     "off": "background:#eceff2;color:#495057;border:1px solid #cbd3db;",
     "info": "background:#e7eef8;color:#29415f;border:1px solid #c3d3ea;",
 }
+CUSTOM_SENSOR_KEY_LABEL = "Custom..."
 
 def _device_identifier(device: dict[str, object]) -> str:
     return (
@@ -346,6 +348,72 @@ class OperatorConsoleQtWindow(QMainWindow):
                 choices.append(sensor_key)
         return sorted(dict.fromkeys(choices))
 
+    def _sensor_key_is_valid_for_kind(self, kind: str, sensor_key: str) -> bool:
+        sensor_key = canonical_sensor_key(sensor_key)
+        if kind == "realsense":
+            return camera_path_parts_for_sensor_key(sensor_key) is not None
+        if kind == "gelsight":
+            return tactile_path_parts_for_sensor_key(sensor_key) is not None
+        return False
+
+    def _set_sensor_combo_value(self, combo: QComboBox, value: str) -> None:
+        combo.blockSignals(True)
+        combo.setCurrentText(value)
+        combo.blockSignals(False)
+
+    def _ensure_sensor_combo_has_key(self, combo: QComboBox, sensor_key: str) -> None:
+        sensor_key = canonical_sensor_key(sensor_key)
+        if not sensor_key:
+            return
+        if combo.findText(sensor_key) >= 0:
+            return
+        custom_index = combo.findText(CUSTOM_SENSOR_KEY_LABEL)
+        insert_index = combo.count() if custom_index < 0 else custom_index
+        combo.insertItem(insert_index, sensor_key)
+
+    def _prompt_custom_sensor_key(self, kind: str, current_value: str) -> str | None:
+        placeholder = (
+            "/spark/cameras/world/scene_4"
+            if kind == "realsense"
+            else "/spark/tactile/lightning/finger_left"
+        )
+        sensor_key, accepted = QInputDialog.getText(
+            self,
+            "Custom Sensor Key",
+            f"Enter canonical sensor key for {kind}.\nExample: {placeholder}",
+            text=current_value,
+        )
+        if not accepted:
+            return None
+        return canonical_sensor_key(sensor_key)
+
+    def _handle_sensor_combo_change(self, combo: QComboBox, kind: str) -> None:
+        selected = canonical_sensor_key(combo.currentText())
+        previous = canonical_sensor_key(str(combo.property("last_valid_sensor_key") or ""))
+
+        if selected == CUSTOM_SENSOR_KEY_LABEL:
+            custom_key = self._prompt_custom_sensor_key(kind, previous)
+            if custom_key is None:
+                self._set_sensor_combo_value(combo, previous)
+                return
+            if not self._sensor_key_is_valid_for_kind(kind, custom_key):
+                self.config_file_status.setText(
+                    f"Invalid sensor key for {kind}: {custom_key}"
+                )
+                self._set_sensor_combo_value(combo, previous)
+                return
+            self._ensure_sensor_combo_has_key(combo, custom_key)
+            self._set_sensor_combo_value(combo, custom_key)
+            combo.setProperty("last_valid_sensor_key", custom_key)
+            self.config_file_status.setText(f"Using custom sensor key: {custom_key}")
+            return
+
+        if selected and self._sensor_key_is_valid_for_kind(kind, selected):
+            combo.setProperty("last_valid_sensor_key", selected)
+            return
+
+        combo.setProperty("last_valid_sensor_key", "")
+
     def _current_device_selection_map(self) -> dict[tuple[str, str], dict[str, object]]:
         selections: dict[tuple[str, str], dict[str, object]] = {}
         for device in self._session_devices():
@@ -525,13 +593,18 @@ class OperatorConsoleQtWindow(QMainWindow):
         sensor_combo.addItem("")
         sensor_choices = self._sensor_key_choices_for_kind(kind_value)
         sensor_combo.addItems(sensor_choices)
+        sensor_combo.addItem(CUSTOM_SENSOR_KEY_LABEL)
         sensor_key_value = str(device.get("sensor_key", "")).strip()
-        if sensor_key_value and sensor_combo.findText(sensor_key_value) < 0:
-            sensor_combo.addItem(sensor_key_value)
+        if sensor_key_value and sensor_key_value != CUSTOM_SENSOR_KEY_LABEL:
+            self._ensure_sensor_combo_has_key(sensor_combo, sensor_key_value)
         if sensor_key_value:
             sensor_combo.setCurrentText(sensor_key_value)
         else:
             sensor_combo.setCurrentIndex(0)
+        sensor_combo.setProperty("last_valid_sensor_key", sensor_key_value)
+        sensor_combo.currentIndexChanged.connect(
+            lambda _index, combo=sensor_combo, kind=kind_value: self._handle_sensor_combo_change(combo, kind)
+        )
         self.session_devices_table.setCellWidget(row, 3, sensor_combo)
 
         identifier_item.setData(

@@ -98,6 +98,9 @@ Rules:
 - `Record` is editable
 - `Sensor` is editable
 - sensor-key choices are filtered by device kind
+- the `Sensor` dropdown may include `Custom...`:
+  - it should accept a manually entered canonical sensor key
+  - the key must validate against the shared topic-prefix grammar for that device kind
 - `Identifier` is only a display field:
   - RealSense rows show the device serial number
   - GelSight rows show the device path
