@@ -38,7 +38,7 @@ _CAMERA_TOPIC_PATTERN = re.compile(
 )
 _TACTILE_TOPIC_PATTERN = re.compile(
     r"^/spark/tactile/(?P<arm>lightning|thunder)/(?P<finger>finger_left|finger_right)/"
-    r"(?P<suffix>color/image_raw|depth/image_raw|marker_offset)$"
+    r"(?P<suffix>color/image_raw)$"
 )
 _STATE_SOURCE_COUNTS = (
     ("joint_state", 6),
@@ -135,8 +135,6 @@ def sensor_topic_for_stream(sensor_key: str, stream: str) -> str | None:
     if tactile_prefix is not None:
         suffix = {
             "color": "color/image_raw",
-            "depth": "depth/image_raw",
-            "marker_offset": "marker_offset",
         }.get(stream_name)
         return f"{tactile_prefix}/{suffix}" if suffix else None
 
@@ -161,8 +159,6 @@ def default_topics_for_sensor_key(sensor_key: str) -> list[str]:
             topic
             for topic in (
                 sensor_topic_for_stream(sensor_key, "color"),
-                sensor_topic_for_stream(sensor_key, "depth"),
-                sensor_topic_for_stream(sensor_key, "marker_offset"),
             )
             if topic
         ]
@@ -279,13 +275,7 @@ def effective_profile_for_session(
     published["images"] = color_specs
     effective["published_depth"] = depth_specs
 
-    raw_only_topics: list[str] = []
-    for sensor_key in sorted(dict.fromkeys(normalized_sensor_keys)):
-        for stream in ("color_metadata", "depth_metadata", "marker_offset"):
-            topic = sensor_topic_for_stream(sensor_key, stream)
-            if topic:
-                raw_only_topics.append(topic)
-    effective["raw_only_topics"] = sorted(dict.fromkeys(raw_only_topics))
+    effective["raw_only_topics"] = []
     return effective
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
@@ -871,13 +861,6 @@ def _static_topic_descriptor(topic: str) -> dict[str, Any]:
         arm = tactile_match.group("arm")
         finger = tactile_match.group("finger")
         suffix = tactile_match.group("suffix")
-        kind = "raw_sensor" if suffix == "color/image_raw" else "derived_sensor"
-        value_meaning = {
-            "color/image_raw": "GelSight tactile RGB frame",
-            "depth/image_raw": "GelSight derived depth image",
-            "marker_offset": "GelSight marker displacement cloud",
-        }[suffix]
-        units = "millimeters" if suffix == "depth/image_raw" else None
         return {
             "producer": {
                 "process": "data_pipeline/gelsight_bridge.py",
@@ -885,9 +868,9 @@ def _static_topic_descriptor(topic: str) -> dict[str, Any]:
                 "upstream_source": f"GelSight Mini {arm}/{finger} tactile stream",
             },
             "semantics": {
-                "kind": kind,
-                "value_meaning": value_meaning,
-                "units": units,
+                "kind": "raw_sensor",
+                "value_meaning": "GelSight tactile RGB frame",
+                "units": None,
                 "convention": None,
             },
             "timestamp": {
@@ -1022,11 +1005,6 @@ def manifest_sensors(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return list(devices)
 
 
-def manifest_dataset_id(manifest: dict[str, Any]) -> str | None:
-    value = manifest_episode(manifest).get("dataset_id")
-    return str(value) if value not in {"", None} else None
-
-
 def manifest_episode_id(manifest: dict[str, Any]) -> str:
     return str(manifest_episode(manifest)["episode_id"])
 
@@ -1089,9 +1067,6 @@ def build_notes_template(manifest: dict[str, Any]) -> str:
     episode = manifest_episode(manifest)
     profile = manifest_profile(manifest)
     lines = [f"# {episode['episode_id']}", ""]
-    dataset_id = episode.get("dataset_id")
-    if dataset_id not in {"", None}:
-        lines.append(f"- dataset_id: {dataset_id}")
     lines.extend(
         [
             f"- task_name: {episode['task_name']}",

@@ -340,8 +340,6 @@ Silent filling of large gaps hides real collection problems and makes the datase
 
 The following topics remain raw-only in V2 unless the effective schema explicitly publishes them:
 
-- camera metadata topics
-- tactile marker-offset topics
 - `/spark/session/teleop_active`
 - optional point cloud or debugging topics
 

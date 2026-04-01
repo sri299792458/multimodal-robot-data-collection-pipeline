@@ -159,6 +159,7 @@ class OperatorConsoleBackend:
             "language_instruction",
             "operator",
             "active_arms",
+            "conversion_profile",
         ):
             if key in config_like:
                 config[key] = config_like[key]
@@ -279,6 +280,7 @@ class OperatorConsoleBackend:
             "language_instruction": str(config.get("language_instruction", "")).strip(),
             "operator": str(config.get("operator", "")).strip(),
             "active_arms": str(config.get("active_arms", "")).strip(),
+            "conversion_profile": str(config.get("conversion_profile", "")).strip(),
             "session_devices": json.loads(json.dumps(config.get("session_devices", []))),
         }
 
@@ -1336,6 +1338,12 @@ class OperatorConsoleBackend:
         episode_dir = REPO_ROOT / "raw_episodes" / episode_id
         published_root = target_path.parent
         dataset_id = target_path.name
+        profile_ref = str(config.get("conversion_profile", "")).strip()
+        if not profile_ref:
+            raise RuntimeError("Choose a conversion profile before converting.")
+        profile_path = self._resolve_user_path(profile_ref)
+        if not profile_path.is_file():
+            raise FileNotFoundError(f"Conversion profile not found: {profile_path}")
         args = [
             shlex.quote(str(CONVERTER_PYTHON)),
             "data_pipeline/convert_episode_bag_to_lerobot.py",
@@ -1344,6 +1352,7 @@ class OperatorConsoleBackend:
             shlex.quote(dataset_id),
         ]
         args.extend(["--published-root", shlex.quote(str(published_root))])
+        args.extend(["--profile", shlex.quote(str(profile_path))])
         return f"source {shlex.quote(ROS_SETUP)} && " + " ".join(args)
 
     def _required_record_topics(self, config: dict[str, Any]) -> list[str]:

@@ -44,7 +44,6 @@ from data_pipeline.pipeline_utils import (  # noqa: E402
     load_profile,
     manifest_active_arms,
     manifest_clock_policy,
-    manifest_dataset_id,
     manifest_episode_id,
     manifest_language_instruction,
     manifest_profile_name,
@@ -550,7 +549,8 @@ def get_or_create_dataset(
     features: dict[str, dict[str, Any]],
     vcodec: str,
 ) -> LeRobotDataset:
-    if dataset_root.exists():
+    info_path = dataset_root / "meta" / "info.json"
+    if info_path.is_file():
         dataset = LeRobotDataset(
             repo_id=dataset_id,
             root=dataset_root,
@@ -561,6 +561,17 @@ def get_or_create_dataset(
             raise RuntimeError(f"Existing dataset fps {dataset.fps} does not match expected fps {fps}")
         compare_feature_specs(dataset.meta.features, features)
         return dataset
+
+    if dataset_root.exists():
+        if not dataset_root.is_dir():
+            raise RuntimeError(f"Published dataset target is not a directory: {dataset_root}")
+        if any(dataset_root.iterdir()):
+            raise RuntimeError(
+                "Published dataset folder exists but is not an initialized local dataset.\n"
+                f"folder={dataset_root}\n"
+                "Expected meta/info.json for an existing dataset, or an empty folder for a new dataset."
+            )
+        dataset_root.rmdir()
 
     dataset_root.parent.mkdir(parents=True, exist_ok=True)
     return LeRobotDataset.create(
@@ -1320,7 +1331,6 @@ def main(argv: list[str] | None = None) -> int:
 
     diagnostics = {
         "episode_id": manifest_episode_id(manifest),
-        "manifest_dataset_id": manifest_dataset_id(manifest),
         "dataset_id": dataset_id,
         "dataset_root": str(dataset_root),
         "dataset_episode_index": dataset_episode_index,
@@ -1335,7 +1345,6 @@ def main(argv: list[str] | None = None) -> int:
     }
     summary = {
         "episode_id": manifest_episode_id(manifest),
-        "manifest_dataset_id": manifest_dataset_id(manifest),
         "dataset_id": dataset_id,
         "dataset_root": str(dataset_root),
         "dataset_episode_index": dataset_episode_index,

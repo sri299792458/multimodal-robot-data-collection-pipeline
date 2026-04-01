@@ -154,8 +154,6 @@ Examples:
 V2 tactile topics use:
 
 - `/spark/tactile/{arm}/{finger_slot}/color/image_raw`
-- `/spark/tactile/{arm}/{finger_slot}/depth/image_raw`
-- `/spark/tactile/{arm}/{finger_slot}/marker_offset`
 
 Where `{finger_slot}` is one of:
 
@@ -165,8 +163,6 @@ Where `{finger_slot}` is one of:
 Examples:
 
 - `/spark/tactile/lightning/finger_left/color/image_raw`
-- `/spark/tactile/lightning/finger_right/depth/image_raw`
-- `/spark/tactile/thunder/finger_left/marker_offset`
 
 
 ## Raw Recording Rules

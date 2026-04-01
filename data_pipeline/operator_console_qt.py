@@ -527,6 +527,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         if "operator" in config:
             self._set_field("operator", str(config.get("operator", "")))
         self._set_field("active_arms", str(config.get("active_arms", "lightning")))
+        self._set_field("conversion_profile", str(config.get("conversion_profile", "")))
         discovery_config = {
             "active_arms": str(config.get("active_arms", "lightning")),
             "sensors_file": str(self._get_field("sensors_file")).strip(),
@@ -677,6 +678,20 @@ class OperatorConsoleQtWindow(QMainWindow):
         artifacts_box = QGroupBox("Latest Artifacts")
         artifacts_layout = QFormLayout(artifacts_box)
         artifacts_layout.setSpacing(8)
+        conversion_profile_row = QWidget()
+        conversion_profile_layout = QHBoxLayout(conversion_profile_row)
+        conversion_profile_layout.setContentsMargins(0, 0, 0, 0)
+        conversion_profile_layout.setSpacing(8)
+        self.form_widgets["conversion_profile"] = QLineEdit()
+        self.form_widgets["conversion_profile"].setPlaceholderText(
+            "conversion YAML, e.g. data_pipeline/configs/multisensor_20hz.yaml"
+        )
+        self.form_widgets["conversion_profile"].editingFinished.connect(self._normalize_conversion_profile_field)
+        self.browse_conversion_profile_button = QPushButton("Browse")
+        self.browse_conversion_profile_button.clicked.connect(self._browse_conversion_profile)
+        conversion_profile_layout.addWidget(self.form_widgets["conversion_profile"], 1)
+        conversion_profile_layout.addWidget(self.browse_conversion_profile_button)
+        artifacts_layout.addRow("Conversion Profile", conversion_profile_row)
         publish_target_row = QWidget()
         publish_target_layout = QHBoxLayout(publish_target_row)
         publish_target_layout.setContentsMargins(0, 0, 0, 0)
@@ -748,6 +763,33 @@ class OperatorConsoleQtWindow(QMainWindow):
             return
         self.published_target_last_saved = stored
         self.published_target_edit.setText(stored)
+
+    def _browse_conversion_profile(self) -> None:
+        current = str(self._get_field("conversion_profile")).strip()
+        start_dir = str((REPO_ROOT / current).resolve().parent) if current else str(REPO_ROOT / "data_pipeline" / "configs")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose Conversion Profile",
+            start_dir,
+            "YAML Files (*.yaml *.yml)",
+        )
+        if not path:
+            return
+        stored = self.backend._stored_path(Path(path))
+        self._set_field("conversion_profile", stored)
+        self.config_file_status.setText(f"Loaded conversion profile: {stored}")
+
+    def _normalize_conversion_profile_field(self) -> None:
+        profile_ref = str(self._get_field("conversion_profile")).strip()
+        if not profile_ref:
+            return
+        profile_path = self.backend._resolve_user_path(profile_ref)
+        if not profile_path.is_file():
+            self.config_file_status.setText(f"Conversion profile not found: {profile_path}")
+            return
+        stored = self.backend._stored_path(profile_path)
+        self._set_field("conversion_profile", stored)
+        self.config_file_status.setText(f"Loaded conversion profile: {stored}")
 
     def _save_published_dataset_target(self) -> None:
         text = self.published_target_edit.text().strip()
@@ -942,6 +984,7 @@ class OperatorConsoleQtWindow(QMainWindow):
             "language_instruction": self._get_field("language_instruction"),
             "operator": self._get_field("operator"),
             "active_arms": self._get_field("active_arms"),
+            "conversion_profile": self._get_field("conversion_profile"),
             "sensors_file": self._get_field("sensors_file"),
             "session_devices": session_devices,
             "realsense_enabled": bool(enabled_realsense),

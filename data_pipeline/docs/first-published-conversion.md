@@ -19,14 +19,31 @@ Make sure these are already true:
 - the latest raw episode exists under:
   - `raw_episodes/<episode_id>/`
 - the shared `.venv` is ready
-- the published dataset target you want to use is known
+- the conversion profile and published folder you want to use are known
 
 If those are not true yet, go back to:
 
 - [first-raw-demo.md](./first-raw-demo.md)
 
 
-## 1. Choose The Published Dataset Target
+## 1. Choose The Conversion Profile
+
+In the operator console, set `Conversion Profile`.
+
+For the normal workflow, the default is:
+
+- `data_pipeline/configs/multisensor_20hz.yaml`
+
+Use `Browse` if you want a different conversion YAML.
+
+Important rule:
+
+- if you change the conversion profile, use a new `Published Folder`
+
+That keeps one published folder aligned with one conversion contract.
+
+
+## 2. Choose The Published Dataset Target
 
 In the operator console, set `Published Folder`.
 
@@ -49,7 +66,7 @@ Why this exists:
 - the target must therefore be one specific dataset folder
 
 
-## 2. Check The Converter Card
+## 3. Check The Converter Card
 
 After a successful raw recording, the `Converter` card should show:
 
@@ -59,10 +76,11 @@ If it does not:
 
 - make sure the latest raw recording actually completed
 - make sure the raw episode folder still exists
+- make sure the `Conversion Profile` field is set
 - make sure the `Published Folder` field is set
 
 
-## 3. Start Conversion
+## 4. Start Conversion
 
 Click:
 
@@ -80,7 +98,7 @@ What should happen:
 You do **not** need to launch `convert_episode_bag_to_lerobot.py` manually in the normal workflow.
 
 
-## 4. Wait For Completion
+## 5. Wait For Completion
 
 When conversion succeeds, the `Converter` card should settle to:
 
@@ -100,12 +118,12 @@ If conversion fails, the card will show:
 In that case, inspect the console output before retrying.
 
 
-## 5. Verify The Published Dataset On Disk
+## 6. Verify The Published Dataset On Disk
 
 From the repository root:
 
 ```bash
-cd /home/srinivas/Desktop/pipeline
+cd /home/srinivas/Desktop/spark-workspace/spark-data-collection
 ls -la published/<dataset_id>
 ```
 
@@ -122,7 +140,7 @@ If depth was published for this episode, you should also see:
 - `meta/depth_info.json`
 
 
-## 6. Check The Episode-Specific Metadata
+## 7. Check The Episode-Specific Metadata
 
 The converter also writes episode-level metadata under:
 
@@ -142,7 +160,7 @@ The published dataset also keeps a copy of the raw source snapshot under:
 That copied source snapshot is the provenance record for the published episode.
 
 
-## 7. Optional Quick Sanity Check
+## 8. Optional Quick Sanity Check
 
 You can inspect the published dataset metadata quickly with:
 

@@ -85,8 +85,6 @@ Camera slots are 1-based. This is intentional for user-facing consistency with j
 | `/spark/cameras/{attachment}/{camera_slot}/color/image_raw` | `sensor_msgs/msg/Image` | raw sensor | `host_capture_time_v1` immediately after `wait_for_frames()` returns | 20-30 Hz | raw/published depending on profile |
 | `/spark/cameras/{attachment}/{camera_slot}/depth/image_rect_raw` | `sensor_msgs/msg/Image` | raw sensor | `host_capture_time_v1` immediately after `wait_for_frames()` returns | 20-30 Hz | raw-only or published-depth depending on profile |
 | `/spark/tactile/{arm}/{finger_slot}/color/image_raw` | `sensor_msgs/msg/Image` | raw sensor | `host_capture_time_v1` immediately after `get_image()` returns | 15-30 Hz | raw/published depending on profile |
-| `/spark/tactile/{arm}/{finger_slot}/depth/image_raw` | `sensor_msgs/msg/Image` | derived sensor | same stamp as the source tactile RGB frame | 15-30 Hz | raw-only unless a profile says otherwise |
-| `/spark/tactile/{arm}/{finger_slot}/marker_offset` | `sensor_msgs/msg/PointCloud2` | derived sensor | same stamp as the source tactile RGB frame | 15-30 Hz | raw-only unless a profile says otherwise |
 
 
 ## Examples
@@ -100,7 +98,6 @@ Examples of valid V2 raw topics:
 - `/spark/cameras/world/scene_1/color/image_raw`
 - `/spark/cameras/world/scene_2/depth/image_rect_raw`
 - `/spark/tactile/lightning/finger_left/color/image_raw`
-- `/spark/tactile/thunder/finger_right/marker_offset`
 
 
 ## Forbidden V1 Aliases
