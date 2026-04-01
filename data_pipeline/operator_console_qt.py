@@ -682,13 +682,13 @@ class OperatorConsoleQtWindow(QMainWindow):
         publish_target_layout.setContentsMargins(0, 0, 0, 0)
         publish_target_layout.setSpacing(8)
         self.published_target_edit = QLineEdit()
-        self.published_target_edit.setPlaceholderText("published/<dataset_folder> or dataset folder name")
+        self.published_target_edit.setPlaceholderText("folder under published/, e.g. new")
         self.published_target_edit.editingFinished.connect(self._save_published_dataset_target)
         self.browse_published_target_button = QPushButton("Browse")
         self.browse_published_target_button.clicked.connect(self._browse_published_dataset_target)
         publish_target_layout.addWidget(self.published_target_edit, 1)
         publish_target_layout.addWidget(self.browse_published_target_button)
-        artifacts_layout.addRow("Publish Target", publish_target_row)
+        artifacts_layout.addRow("Published Folder", publish_target_row)
         self.latest_episode_label = QLabel("")
         self.latest_episode_label.setWordWrap(True)
         self.latest_episode_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -736,7 +736,7 @@ class OperatorConsoleQtWindow(QMainWindow):
             start_dir = str(self.backend._published_root())
         path = QFileDialog.getExistingDirectory(
             self,
-            "Choose Published Dataset Target",
+            "Choose Published Folder",
             start_dir,
         )
         if not path:

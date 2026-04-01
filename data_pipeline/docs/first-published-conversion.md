@@ -28,7 +28,7 @@ If those are not true yet, go back to:
 
 ## 1. Choose The Published Dataset Target
 
-In the operator console, set `Publish Target`.
+In the operator console, set `Published Folder`.
 
 The value must resolve to a direct child of `published/`.
 
@@ -59,7 +59,7 @@ If it does not:
 
 - make sure the latest raw recording actually completed
 - make sure the raw episode folder still exists
-- make sure the `Publish Target` field is set
+- make sure the `Published Folder` field is set
 
 
 ## 3. Start Conversion

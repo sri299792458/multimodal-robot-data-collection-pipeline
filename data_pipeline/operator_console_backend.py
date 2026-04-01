@@ -52,7 +52,7 @@ SETTINGS_PATH = STATE_DIR / "settings.yaml"
 TOPIC_PROBE_SCRIPT = REPO_ROOT / "data_pipeline" / "ros_topic_probe.py"
 VIEWER_REPO = WORKSPACE_ROOT / "lerobot-dataset-visualizer"
 VIEWER_BUN = Path.home() / ".bun" / "bin" / "bun"
-DEFAULT_VIEWER_BASE_URL = os.environ.get("PIPELINE_VIEWER_BASE_URL", "http://localhost:3000").strip().rstrip("/")
+DEFAULT_VIEWER_BASE_URL = "http://localhost:3000"
 
 
 @dataclass
@@ -426,7 +426,6 @@ class OperatorConsoleBackend:
     def start_session(self, config: dict[str, Any]) -> None:
         self.last_action_error = ""
         self.latest_viewer_url = None
-        self._refresh_session_capture_plan(config)
         self._start_process("spark_devices", self._build_spark_devices_command())
         self._start_process("teleop_gui", self._build_teleop_gui_command())
         if config.get("realsense_enabled", True):
@@ -633,13 +632,12 @@ class OperatorConsoleBackend:
             raise RuntimeError(f"Bun not found: {VIEWER_BUN}")
         viewer_base_url = DEFAULT_VIEWER_BASE_URL
         dataset_url = f"{viewer_base_url}/datasets"
-        localhost_dataset_url = "http://localhost:3000/datasets"
         return (
             f"cd {shlex.quote(str(VIEWER_REPO))} && "
             "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY "
             "-u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy "
             f"NEXT_PUBLIC_DATASET_URL={shlex.quote(dataset_url)} "
-            f"DATASET_URL={shlex.quote(localhost_dataset_url)} "
+            f"DATASET_URL={shlex.quote(dataset_url)} "
             f"REPO_ID={shlex.quote(f'local/{dataset_id}')} "
             f"EPISODES={shlex.quote(str(episode_index))} "
             f"{shlex.quote(str(VIEWER_BUN))} start"
@@ -1072,6 +1070,7 @@ class OperatorConsoleBackend:
         self.validation_running = True
         self.last_validation_ok = False
         self.last_validation_signature = ""
+        self._refresh_session_capture_plan(config)
         probe_errors = self._probe_required_streams(config)
         if probe_errors:
             self.last_validation_output = "\n".join(probe_errors)

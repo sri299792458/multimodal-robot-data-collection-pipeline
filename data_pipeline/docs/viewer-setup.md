@@ -57,15 +57,17 @@ The operator console still owns viewer startup at runtime.
 
 - checks the current published dataset target
 - starts the viewer server if needed
-- strips proxy environment variables for the local dataset path
 - opens the resolved local episode URL
 
 What the setup script does is only prepare the viewer toolchain and production
 build so that `Open Viewer` does not fail due to missing `bun` or a missing
 production bundle.
 
-You do not need to manage the local proxy/runtime quirks manually during normal
-use. The operator console's `Open Viewer` path already handles those at runtime.
+The supported viewer contract is local-only:
+
+- the viewer server runs on the same machine as the operator console
+- the browser is opened on that same machine
+- the viewer base URL is always `http://localhost:3000`
 
 ## Next Step
 

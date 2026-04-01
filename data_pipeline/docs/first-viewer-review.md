@@ -18,7 +18,7 @@ Make sure these are already true:
 - at least one episode was converted successfully
 - the `Converter` card ended at:
   - `Latest dataset ready for review`
-- the `Publish Target` field still points at the dataset you want to inspect
+- the `Published Folder` field still points at the dataset you want to inspect
 
 If those are not true yet, go back to:
 
@@ -30,7 +30,7 @@ If those are not true yet, go back to:
 
 Before clicking anything, confirm the operator console still points at the right published dataset:
 
-- `Publish Target`
+- `Published Folder`
   - should be the dataset you just converted into
 
 The viewer path uses that target to resolve the local dataset to open.
@@ -54,6 +54,12 @@ What should happen:
 - the backend checks that the published dataset exists
 - it starts the local viewer server if needed
 - it opens the resolved local episode URL for the latest episode in that dataset
+
+The supported workflow is local-only:
+
+- the viewer server runs on this machine
+- the browser also runs on this machine
+- the viewer URL is `http://localhost:3000/...`
 
 You do **not** need to manually start the viewer server in the normal workflow.
 
