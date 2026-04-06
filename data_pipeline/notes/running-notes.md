@@ -1,5 +1,16 @@
 # Running Notes
 
+## 2026-04-01
+
+### Same-machine multi-account setup note
+
+- Confirmed that `system-setup.md` is machine-level, not per Linux account.
+- On the same machine, a second user account does not need to reinstall ROS Jazzy or the apt-installed base packages if they are already present under `/opt/ros/jazzy` and system apt.
+- The second account should usually start from workspace clone + `.venv` setup, then verify hardware/device permissions separately.
+- The docs should later make this distinction explicit:
+  - system setup = per machine/admin
+  - workspace + Python env + local config = per user account
+
 ## 2026-03-25
 
 ### Raiden comparison pass
@@ -1170,7 +1181,7 @@
   - it remains a local Python desktop app
   - it must not become a browser/server app
 - Also clarified the migration rule:
-  - the current Tk console is a prototype/reference only
+  - the old Tk console was a prototype only and has since been removed
   - Qt migration must preserve the same backend supervisor, process model, readiness gates, and operator workflow
 
 ### Qt frontend implementation start
@@ -2048,7 +2059,7 @@
   - `/spark/session/teleop_active`
 - Updated the RealSense and GelSight launch/bridge path to take canonical V2 role specs instead of the old fixed `wrist/scene/left/right` launch arguments.
 - Updated the operator-console backend, discovery layer, session-plan layer, manifest helpers, and dummy-episode generator to use canonical V2 sensor roles.
-- Removed the old Tk operator console from the active `data_pipeline/` surface by archiving it under [data_pipeline/archive/operator_console_tk_v1.py](/home/srinivas/Desktop/pipeline/data_pipeline/archive/operator_console_tk_v1.py).
+- Removed the old Tk operator console entirely from `data_pipeline/`.
 - Updated the active README and bring-up/runbook docs so they no longer advertise the V1 launch arguments or topic names as live guidance.
 
 ### Session/UI spec reset
