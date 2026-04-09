@@ -14,7 +14,6 @@ theme:
     primary: custom
     accent: custom
   features:
-    - navigation.tabs
     - navigation.sections
     - navigation.top
     - content.code.copy

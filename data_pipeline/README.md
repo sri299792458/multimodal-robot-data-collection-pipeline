@@ -23,6 +23,13 @@ The default setup path for a collection-only user on the existing collection mac
 4. [first-published-conversion.md](./docs/first-published-conversion.md)
 5. [first-viewer-review.md](./docs/first-viewer-review.md)
 
+The shared-account launcher shipped in this repo is:
+
+- [`../collect`](../collect)
+
+Any account can run it directly from the repo root, and accounts that want the
+short command name can add it to `PATH`.
+
 If you are using your own Linux account on the same machine, start with:
 
 - [personal-account-setup.md](./docs/personal-account-setup.md)

@@ -60,6 +60,24 @@ What still matters operationally is:
 - the account's collection launcher exists
 - the expected workspace and environment already exist
 
+The checked-in launcher is:
+
+- [`collect`](../../collect)
+
+Any account can run the script directly from the repo root:
+
+```bash
+~/spark-workspace/spark-data-collection/collect
+```
+
+If you want the short command name `collect`, expose that repo-owned script on
+`PATH`, for example:
+
+```bash
+mkdir -p ~/bin
+ln -sfn ~/spark-workspace/spark-data-collection/collect ~/bin/collect
+```
+
 ## Recommended Path On The Shared Lab Machine
 
 After `collect` launches the console, continue with:

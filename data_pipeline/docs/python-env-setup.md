@@ -108,6 +108,20 @@ source /opt/ros/jazzy/setup.bash
 This prepares the local pinned `librealsense v2.54.2` runtime used by the
 current RealSense capture path.
 
+Any account can run the repo-owned launcher directly:
+
+```bash
+~/spark-workspace/spark-data-collection/collect
+```
+
+If you want the short command name `collect`, expose that repo-owned launcher
+on `PATH` after the environment is ready:
+
+```bash
+mkdir -p ~/bin
+ln -sfn ~/spark-workspace/spark-data-collection/collect ~/bin/collect
+```
+
 ## Why ROS Still Needs To Be Sourced
 
 Even inside `.venv`, the ROS environment must still be sourced before running
