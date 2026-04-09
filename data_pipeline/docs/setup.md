@@ -114,4 +114,4 @@ This setup section is **not** the place for:
 Those belong in the later documentation sections:
 
 - design choices
-- operational knowledge
+- operations and debugging

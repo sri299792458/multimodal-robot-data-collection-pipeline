@@ -37,13 +37,19 @@ Before launching anything, check the rig physically:
 If you are using multiple RealSense cameras, keep them on the intended USB
 controller layout. Do not assume that any two convenient ports are equivalent.
 
+Use:
+
+- [usb-port-and-controller-mapping.md](./usb-port-and-controller-mapping.md)
+
+if you need to verify or remap the machine.
+
 
 ## 2. Start From The Example Files
 
 The operator console now falls back to the checked-in example files on first launch:
 
-- [operator_console_presets.example.yaml](../configs/operator_console_presets.example.yaml)
-- [sensors.example.yaml](../configs/sensors.example.yaml)
+- `data_pipeline/configs/operator_console_presets.example.yaml`
+- `data_pipeline/configs/sensors.example.yaml`
 
 You do **not** need to create `sensors.local.yaml` before the GUI is usable.
 

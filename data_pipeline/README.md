@@ -6,6 +6,15 @@ For the curated docs entrypoint, start with [docs/setup.md](./docs/setup.md).
 
 For the design section, start with [docs/design-choices.md](./docs/design-choices.md).
 
+For the operations section, start with [docs/operations-and-debugging.md](./docs/operations-and-debugging.md).
+
+To preview the MkDocs site locally:
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve
+```
+
 The default setup path for a collection-only user on the existing collection machine is:
 
 1. [lab-machine-quick-start.md](./docs/lab-machine-quick-start.md)
@@ -42,15 +51,25 @@ Curated design pages are:
 - [session-capture-plan.md](./docs/session-capture-plan.md)
 - [dataset-mapping.md](./docs/dataset-mapping.md)
 - [calibration.md](./docs/calibration.md)
-- [operator-console-spec.md](./docs/operator-console-spec.md)
+
+Curated operations and debugging pages are:
+
+- [operations-and-debugging.md](./docs/operations-and-debugging.md)
+- [usb-port-and-controller-mapping.md](./docs/usb-port-and-controller-mapping.md)
+- [current-lightning-gelsight-runbook.md](./docs/current-lightning-gelsight-runbook.md)
+- [replay.md](./docs/replay.md)
 
 Internal implementation references still live here:
 
 - [V2_SPEC.md](./V2_SPEC.md)
 - [V1_SPEC.md](./V1_SPEC.md) archive-only
 - [notes/running-notes.md](./notes/running-notes.md)
-- [docs/raw-storage.md](./docs/raw-storage.md)
-- [docs/archive-bag.md](./docs/archive-bag.md)
+- [docs/internal/raw-storage.md](./docs/internal/raw-storage.md)
+- [docs/internal/archive-bag.md](./docs/internal/archive-bag.md)
+- [docs/internal/depth-storage.md](./docs/internal/depth-storage.md)
+- [docs/internal/operator-console-spec.md](./docs/internal/operator-console-spec.md)
+- [docs/internal/raiden-reference-analysis.md](./docs/internal/raiden-reference-analysis.md)
+- [docs/internal/teleop-runtime-refactor-spec.md](./docs/internal/teleop-runtime-refactor-spec.md)
 
 The current reference frontend is the Qt implementation:
 

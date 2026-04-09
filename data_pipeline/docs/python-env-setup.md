@@ -83,9 +83,9 @@ source .venv/bin/activate
 
 What that script currently installs:
 
-- [requirements-converter.txt](../requirements-converter.txt)
-- [requirements-teleop.txt](../requirements-teleop.txt)
-- [requirements-operator-console.txt](../requirements-operator-console.txt)
+- `requirements-converter.txt`
+- `requirements-teleop.txt`
+- `requirements-operator-console.txt`
 - `torch==2.6.0`
 - `torchvision==0.21.0`
 - editable `lerobot` from the sibling workspace checkout

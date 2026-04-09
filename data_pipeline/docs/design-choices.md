@@ -55,19 +55,6 @@ page should be tightened or removed rather than left as decorative prose.
   - published dataset contract, alignment policy, and schema resolution
 - [calibration.md](./calibration.md)
   - calibration model and why solved geometry lives outside the sensors file
-- [operator-console-spec.md](./operator-console-spec.md)
-  - why the operator console is discovery-first and why session bring-up is
-    separate from published conversion
-
-
-## Storage And Archive References
-
-- [raw-storage.md](./raw-storage.md)
-  - raw capture storage policy and why capture bags stay plain MCAP
-- [archive-bag.md](./archive-bag.md)
-  - offline archive strategy and compression policy
-- [depth-storage.md](./depth-storage.md)
-  - why published depth is handled separately from RGB and low-dimensional data
 
 
 ## Internal References
@@ -76,6 +63,12 @@ These files still contain useful implementation history, but they should feed
 the curated design pages above rather than become the public design section on
 their own:
 
-- [../V2_SPEC.md](../V2_SPEC.md)
-- [../V1_SPEC.md](../V1_SPEC.md)
-- [../notes/running-notes.md](../notes/running-notes.md)
+- `data_pipeline/V2_SPEC.md`
+- `data_pipeline/V1_SPEC.md`
+- `data_pipeline/notes/running-notes.md`
+- `data_pipeline/docs/internal/operator-console-spec.md`
+- `data_pipeline/docs/internal/raw-storage.md`
+- `data_pipeline/docs/internal/archive-bag.md`
+- `data_pipeline/docs/internal/depth-storage.md`
+- `data_pipeline/docs/internal/raiden-reference-analysis.md`
+- `data_pipeline/docs/internal/teleop-runtime-refactor-spec.md`

@@ -74,8 +74,8 @@ separates that work so:
 
 See:
 
-- [raw-storage.md](./raw-storage.md)
-- [archive-bag.md](./archive-bag.md)
+- `data_pipeline/docs/internal/raw-storage.md`
+- `data_pipeline/docs/internal/archive-bag.md`
 
 Current archive outputs live under:
 
