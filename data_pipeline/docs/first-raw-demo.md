@@ -2,6 +2,11 @@
 
 This page starts after [hardware-bringup.md](./hardware-bringup.md) is already complete.
 
+It applies to both:
+
+- `shared_account` after [lab-machine-quick-start.md](./lab-machine-quick-start.md)
+- a lab member using their own account after [personal-account-setup.md](./personal-account-setup.md)
+
 The goal is simple:
 
 - record one short raw episode successfully
@@ -22,6 +27,11 @@ Make sure these are already true:
 If those are not true yet, go back to:
 
 - [hardware-bringup.md](./hardware-bringup.md)
+
+Normal workflow note:
+
+- on `shared_account`, the console is usually already open because you launched it with `collect`
+- on a personal account, you may have launched the console manually after finishing [personal-account-setup.md](./personal-account-setup.md)
 
 
 ## 1. Prepare A Short Smoke-Test Take

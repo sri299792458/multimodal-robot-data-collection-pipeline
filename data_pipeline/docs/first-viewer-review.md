@@ -2,6 +2,11 @@
 
 This page starts after [first-published-conversion.md](./first-published-conversion.md) is already complete.
 
+It applies to both:
+
+- `shared_account` after [lab-machine-quick-start.md](./lab-machine-quick-start.md)
+- a lab member using their own account after [personal-account-setup.md](./personal-account-setup.md)
+
 The goal is simple:
 
 - open the converted dataset locally in the browser viewer
@@ -13,8 +18,7 @@ The goal is simple:
 
 Make sure these are already true:
 
-- the viewer toolchain was prepared with:
-  - [viewer-setup.md](./viewer-setup.md)
+- the current account already has the viewer toolchain prepared
 - at least one episode was converted successfully
 - the `Converter` card ended at:
   - `Latest dataset ready for review`
@@ -23,7 +27,13 @@ Make sure these are already true:
 If those are not true yet, go back to:
 
 - [viewer-setup.md](./viewer-setup.md)
+- [personal-account-setup.md](./personal-account-setup.md) if you are using your own account
 - [first-published-conversion.md](./first-published-conversion.md)
+
+Normal workflow note:
+
+- on `shared_account`, local viewer setup should already be part of account provisioning
+- on a personal account, the viewer setup should already be covered by [personal-account-setup.md](./personal-account-setup.md)
 
 
 ## 1. Check The Viewer Target
@@ -52,6 +62,7 @@ on the `Converter` card.
 What should happen:
 
 - the backend checks that the published dataset exists
+- it ensures the local viewer mount for that dataset is available
 - it starts the local viewer server if needed
 - it opens the resolved local episode URL for the latest episode in that dataset
 
@@ -62,6 +73,7 @@ The supported workflow is local-only:
 - the viewer URL is `http://localhost:3000/...`
 
 You do **not** need to manually start the viewer server in the normal workflow.
+You also do **not** need to manually create any local viewer dataset mount.
 
 
 ## 3. What Success Looks Like
@@ -69,7 +81,7 @@ You do **not** need to manually start the viewer server in the normal workflow.
 The artifacts section should now show:
 
 - `Dataset`
-  - the published dataset id
+  - the published folder name
 - `Viewer`
   - the resolved local viewer URL
 
@@ -136,7 +148,14 @@ ls published/<dataset_id>/meta/spark_conversion
 
 Only if `Open Viewer` is still failing and you need to isolate whether the
 problem is in the dataset or the console integration, you can start the viewer
-manually from the sibling repo:
+manually from the sibling repo.
+
+Important:
+
+- this only makes sense after at least one `Open Viewer` attempt
+- the console path is what prepares the local dataset mount for the selected folder
+
+Manual start:
 
 ```bash
 cd ~/spark-workspace/lerobot-dataset-visualizer

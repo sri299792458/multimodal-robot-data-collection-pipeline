@@ -1,6 +1,6 @@
 # Hardware Bring-Up
 
-This page is the normal bring-up flow for a new user on a fresh machine.
+This page is the normal bring-up flow on the already-prepared collection machine.
 
 The goal is simple:
 
@@ -10,17 +10,16 @@ The goal is simple:
 
 ## Before You Start
 
-Finish these setup pages first:
+Finish one of these setup paths first:
 
-- [workspace-setup.md](./workspace-setup.md)
-- [system-setup.md](./system-setup.md)
-- [python-env-setup.md](./python-env-setup.md)
+- [lab-machine-quick-start.md](./lab-machine-quick-start.md) for `shared_account`
+- [personal-account-setup.md](./personal-account-setup.md) for your own Linux account
 
 Notes:
 
-- this page assumes the shared `.venv` already exists
-- this page assumes the pinned local `librealsense v2.54.2` runtime has already
-  been prepared
+- this page assumes the current account and workspace were already provisioned
+- this page assumes the repo-local `.venv` already exists
+- this page assumes the pinned local `librealsense v2.54.2` runtime has already been prepared
 - the viewer is **not** required for hardware bring-up
 
 
@@ -72,7 +71,10 @@ before serious data collection.
 
 ## 3. Start The Operator Console
 
-From the repository root:
+Normally this page starts after `collect` already opened the operator console from [lab-machine-quick-start.md](./lab-machine-quick-start.md).
+
+If you are using your own account, or the shared account is not provisioned yet,
+start the console manually from the repository root:
 
 ```bash
 source /opt/ros/jazzy/setup.bash

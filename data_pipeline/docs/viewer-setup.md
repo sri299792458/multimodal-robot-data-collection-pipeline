@@ -1,5 +1,16 @@
 # Viewer Setup
 
+This is a setup page for any account that needs local dataset viewing.
+
+Use it when you are:
+
+- provisioning the shared collection account for local viewer use
+- setting up your own Linux account on the existing collection machine
+- repairing the viewer toolchain or production build
+- setting up a maintainer account that needs `Open Viewer`
+
+Normal operators on the already-prepared lab machine should not need to run this during collection.
+
 The local dataset viewer is not required for raw recording itself, but it is an
 important part of the normal workflow:
 
@@ -16,7 +27,8 @@ The viewer lives in the sibling repo:
 Before running the viewer setup script:
 
 - complete [workspace-setup.md](./workspace-setup.md)
-- complete [system-setup.md](./system-setup.md)
+- complete [system-setup.md](./system-setup.md) if the machine does not already have the required system packages
+- complete [python-env-setup.md](./python-env-setup.md) if this account environment is not provisioned yet
 
 In particular, the viewer setup expects:
 
@@ -56,6 +68,7 @@ The operator console still owns viewer startup at runtime.
 `Open Viewer` in the operator console:
 
 - checks the current published dataset target
+- ensures the local dataset mount for that folder exists
 - starts the viewer server if needed
 - opens the resolved local episode URL
 
@@ -71,10 +84,8 @@ The supported viewer contract is local-only:
 
 ## Next Step
 
-After the viewer toolchain is ready, the normal workflow is:
+After the viewer toolchain is ready, the next step is usually:
 
-- [python-env-setup.md](./python-env-setup.md)
-- [hardware-bringup.md](./hardware-bringup.md)
-- [first-raw-demo.md](./first-raw-demo.md)
-- [first-published-conversion.md](./first-published-conversion.md)
-- [first-viewer-review.md](./first-viewer-review.md)
+- [personal-account-setup.md](./personal-account-setup.md) if you are following the personal-account path
+- [lab-machine-quick-start.md](./lab-machine-quick-start.md) if you are preparing the shared account
+- [hardware-bringup.md](./hardware-bringup.md) if you are testing the flow immediately

@@ -2,29 +2,35 @@
 
 This directory contains the raw-capture and LeRobot conversion stack.
 
-The current implementation contract lives in [V2_SPEC.md](./V2_SPEC.md). The old [V1_SPEC.md](./V1_SPEC.md) file is archive-only. The running implementation log lives in [notes/running-notes.md](./notes/running-notes.md).
+For the curated docs entrypoint, start with [docs/setup.md](./docs/setup.md).
 
-V2 is the authoritative target contract. The codebase is still mid-migration toward it.
+The default setup path for a collection-only user on the existing collection machine is:
 
-The raw bag storage decision lives in [docs/raw-storage.md](./docs/raw-storage.md).
+1. [lab-machine-quick-start.md](./docs/lab-machine-quick-start.md)
+2. [hardware-bringup.md](./docs/hardware-bringup.md)
+3. [first-raw-demo.md](./docs/first-raw-demo.md)
+4. [first-published-conversion.md](./docs/first-published-conversion.md)
+5. [first-viewer-review.md](./docs/first-viewer-review.md)
 
-The offline archive-bag design lives in [docs/archive-bag.md](./docs/archive-bag.md).
+If you are using your own Linux account on the same machine, start with:
 
-For the expected multi-repo workspace layout on a fresh machine, use [docs/workspace-setup.md](./docs/workspace-setup.md).
+- [personal-account-setup.md](./docs/personal-account-setup.md)
 
-For the required Ubuntu and ROS Jazzy packages on a fresh machine, use [docs/system-setup.md](./docs/system-setup.md).
+Supporting setup pages are:
 
-For the local dataset viewer toolchain and build step, use [docs/viewer-setup.md](./docs/viewer-setup.md).
+- [personal-account-setup.md](./docs/personal-account-setup.md)
+- [workspace-setup.md](./docs/workspace-setup.md)
+- [python-env-setup.md](./docs/python-env-setup.md)
+- [viewer-setup.md](./docs/viewer-setup.md)
+- [system-setup.md](./docs/system-setup.md)
 
-For the shared local `.venv` and interpreter split, use [docs/python-env-setup.md](./docs/python-env-setup.md).
+Internal implementation references still live here:
 
-For a generic bring-up sequence, use [docs/hardware-bringup.md](./docs/hardware-bringup.md).
-
-For the first smoke-test raw recording flow after bring-up, use [docs/first-raw-demo.md](./docs/first-raw-demo.md).
-
-For the first published conversion flow after raw capture, use [docs/first-published-conversion.md](./docs/first-published-conversion.md).
-
-For the first local viewer inspection flow after conversion, use [docs/first-viewer-review.md](./docs/first-viewer-review.md).
+- [V2_SPEC.md](./V2_SPEC.md)
+- [V1_SPEC.md](./V1_SPEC.md) archive-only
+- [notes/running-notes.md](./notes/running-notes.md)
+- [docs/raw-storage.md](./docs/raw-storage.md)
+- [docs/archive-bag.md](./docs/archive-bag.md)
 
 The current reference frontend is the Qt implementation:
 
