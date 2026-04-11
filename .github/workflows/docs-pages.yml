@@ -40,6 +40,8 @@ jobs:
 
       - name: Build MkDocs site
         env:
+          DOCS_REPO_NAME: ${{ github.repository }}
+          DOCS_REPO_URL: https://github.com/${{ github.repository }}
           DOCS_EDIT_URI: edit/${{ github.ref_name }}/data_pipeline/docs/
         run: mkdocs build
 
