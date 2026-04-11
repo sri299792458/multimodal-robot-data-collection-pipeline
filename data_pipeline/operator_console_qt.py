@@ -25,6 +25,7 @@ try:
         QLabel,
         QLineEdit,
         QMainWindow,
+        QMessageBox,
         QPushButton,
         QPlainTextEdit,
         QScrollArea,
@@ -1057,6 +1058,26 @@ class OperatorConsoleQtWindow(QMainWindow):
         self.backend.open_viewer(self._config())
         self._focus_process_logs("viewer_server")
 
+    def _discard_latest_take(self) -> None:
+        episode_id = self.backend.latest_episode_id
+        if not episode_id:
+            return
+        button = QMessageBox.StandardButton
+        response = QMessageBox.question(
+            self,
+            "Discard Last Take",
+            (
+                f"Delete raw episode '{episode_id}'?\n\n"
+                "This removes the entire raw episode folder and cannot be undone."
+            ),
+            button.Yes | button.No,
+            button.No,
+        )
+        if response != button.Yes:
+            return
+        self.backend.discard_latest_take()
+        self._focus_process_logs("recorder")
+
     def _start_named_process(self, name: str) -> None:
         self.backend.start_named_process(name, self._config())
         if name in self.backend.processes:
@@ -1164,6 +1185,7 @@ class OperatorConsoleQtWindow(QMainWindow):
         converter_state = str(processes.get("converter", {}).get("state", "stopped"))
         recording_ready = bool(snapshot.get("latest_episode_id")) and snapshot.get("latest_recording_ok") is True
         recording_check_running = bool(snapshot.get("recording_check_running"))
+        discard_available = bool(snapshot.get("discard_latest_take_available"))
         viewer_available = self.backend.viewer_target_available(current_config)
         live_states = {"running", "starting", "stopping"}
         core_running = any(
@@ -1198,7 +1220,14 @@ class OperatorConsoleQtWindow(QMainWindow):
                 stop_enabled = False
 
             if name == "recorder":
-                self._update_recorder_card(card, recorder_state, can_record, recording_check_running)
+                self._update_recorder_card(
+                    card,
+                    recorder_state,
+                    can_record,
+                    recording_check_running,
+                    bool(snapshot.get("latest_episode_id")),
+                    discard_available,
+                )
                 continue
             if name == "converter":
                 self._update_converter_card(card, converter_state, recording_ready, viewer_available)
@@ -1209,7 +1238,15 @@ class OperatorConsoleQtWindow(QMainWindow):
             card.secondary_button.setText("Stop")
             card.secondary_button.setEnabled(stop_enabled)
 
-    def _update_recorder_card(self, card: HealthCard, recorder_state: str, can_record: bool, recording_check_running: bool) -> None:
+    def _update_recorder_card(
+        self,
+        card: HealthCard,
+        recorder_state: str,
+        can_record: bool,
+        recording_check_running: bool,
+        has_latest_episode: bool,
+        discard_available: bool,
+    ) -> None:
         self._rebind_button(card.primary_button, "Record", self._start_recording)
         self._rebind_button(card.secondary_button, "Stop", self._stop_recording)
         if recorder_state == "running":
@@ -1222,8 +1259,9 @@ class OperatorConsoleQtWindow(QMainWindow):
             card.primary_button.setEnabled(False)
             card.secondary_button.setEnabled(False)
             return
+        self._rebind_button(card.secondary_button, "Discard", self._discard_latest_take)
         card.primary_button.setEnabled(bool(can_record))
-        card.secondary_button.setEnabled(False)
+        card.secondary_button.setEnabled(bool(has_latest_episode and discard_available))
 
     def _update_converter_card(self, card: HealthCard, converter_state: str, recording_ready: bool, viewer_available: bool) -> None:
         if converter_state == "running":

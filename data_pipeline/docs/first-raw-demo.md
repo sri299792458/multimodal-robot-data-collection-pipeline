@@ -107,6 +107,13 @@ If it instead shows:
 
 In either failure case, keep the episode folder and inspect the recorder output before taking another long demo.
 
+If the take is obviously bad and you want to remove it before conversion:
+
+- click `Discard` on the `Recorder` card
+- confirm the episode id
+
+That deletes the entire latest raw episode folder, not just the bag.
+
 
 ## 5. Save Optional Post-Take Notes
 

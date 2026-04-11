@@ -1,5 +1,15 @@
 # Running Notes
 
+## 2026-04-11
+
+### Episode curation implementation pass
+
+- Added `Discard Last Take` to the operator console as the first-class raw cleanup path.
+- `Discard Last Take` deletes the whole latest raw episode directory, not just the bag, and is disabled once that take has been converted or archived.
+- Kept `delete_published_episodes.py` out of the supported workflow because it treats published-dataset surgery as the normal path and would drift with Spark-side artifact layout changes.
+- Added the internal curation spec at `docs/internal/episode-curation-and-discard-spec.md`.
+- Left already-published episode cleanup unresolved for now instead of adding a half-finished exclusion layer or patching the external viewer repo.
+
 ## 2026-04-01
 
 ### Same-machine multi-account setup note
@@ -2463,3 +2473,24 @@
   - `meta/spark_source/<episode_id>/notes.md`
 - `meta/depth_info.json` remains only the dataset-level index for the depth sidecar layout.
 - Published depth sidecars also stopped repeating `unit` on every parquet row, and the dataset-level depth metadata now says `raw_uint16` instead of falsely claiming millimeters.
+
+### Episode curation should split raw discard from published exclusion
+
+- Revisited the idea of physically deleting one episode from a published dataset.
+- Built an experimental `delete_published_episodes.py` helper and re-audited it against the actual Spark artifact layout.
+- Conclusion: do not ship that as the supported path.
+- Reason:
+  - it can rewrite the core LeRobot dataset
+  - but it still has to manually patch Spark-specific extras like:
+    - `meta/spark_conversion/<episode_id>/...`
+    - `meta/spark_source/<episode_id>/...`
+    - `depth/...`
+    - `depth_preview/...`
+  - that makes it too coupled to the current artifact layout
+- Keep the supported path narrow for now:
+  - `Discard Last Take` for immediate raw cleanup before conversion
+  - leave already-published episode cleanup as future work
+- Implemented the first part of that design in the operator console:
+  - `Discard Last Take` now deletes the latest raw episode directory from the recorder card
+  - it is only enabled when the latest take has not been converted or archived
+  - it stays disabled while recording analysis or conversion is in flight

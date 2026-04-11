@@ -39,6 +39,8 @@ jobs:
           pip install -r requirements-docs.txt
 
       - name: Build MkDocs site
+        env:
+          DOCS_EDIT_URI: edit/${{ github.ref_name }}/data_pipeline/docs/
         run: mkdocs build
 
       - name: Upload Pages artifact

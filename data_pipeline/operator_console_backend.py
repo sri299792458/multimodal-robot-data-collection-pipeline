@@ -109,6 +109,8 @@ class OperatorConsoleBackend:
         self.recording_check_running = False
         self.latest_recording_config: dict[str, Any] | None = None
         self.pending_conversion_dataset_id: str | None = None
+        self.pending_conversion_episode_id: str | None = None
+        self.latest_converted_episode_id: str | None = None
         self.current_session_capture_plan: dict[str, Any] | None = None
         self.current_session_capture_plan_path: Path | None = None
         self.topic_probe_cache: dict[str, tuple[float, bool]] = {}
@@ -353,6 +355,7 @@ class OperatorConsoleBackend:
         return {
             "session_state": self.session_state(config),
             "published_dataset_target": self.get_published_dataset_target(),
+            "discard_latest_take_available": self.can_discard_latest_take(),
             "processes": {
                 name: {
                     "display_name": proc.display_name,
@@ -466,11 +469,52 @@ class OperatorConsoleBackend:
         command = self._build_convert_command(config, self.latest_episode_id, target_path=target_path)
         self._start_process("converter", command)
         self.pending_conversion_dataset_id = target_path.name
+        self.pending_conversion_episode_id = self.latest_episode_id
         self.latest_conversion_output = ""
         self._record_event(
             "start_conversion",
             {"episode_id": self.latest_episode_id, "dataset_id": self.pending_conversion_dataset_id},
         )
+
+    def can_discard_latest_take(self) -> bool:
+        if not self.latest_episode_id:
+            return False
+        if self.processes["recorder"].state in {"running", "starting", "stopping"}:
+            return False
+        if self.processes["converter"].state in {"running", "starting", "stopping"}:
+            return False
+        if self.recording_check_running:
+            return False
+        episode_dir = self._latest_episode_dir()
+        if episode_dir is None or not episode_dir.is_dir():
+            return False
+        if self.latest_converted_episode_id == self.latest_episode_id:
+            return False
+        if self._episode_has_archive(episode_dir):
+            return False
+        return True
+
+    def discard_latest_take(self) -> None:
+        self.last_action_error = ""
+        if not self.latest_episode_id:
+            self.last_action_error = "No recorded episode is known yet."
+            return
+        if not self.can_discard_latest_take():
+            self.last_action_error = f"Latest take cannot be discarded: {self.latest_episode_id}"
+            return
+        episode_id = self.latest_episode_id
+        episode_dir = self._latest_episode_dir()
+        if episode_dir is None or not episode_dir.is_dir():
+            self.last_action_error = f"Raw episode directory not found for {episode_id}."
+            return
+        shutil.rmtree(episode_dir)
+        self.latest_episode_id = None
+        self.latest_recording_ok = None
+        self.latest_recording_check_output = ""
+        self.latest_recording_config = None
+        self.latest_episode_notes_output = ""
+        self.pending_conversion_episode_id = None
+        self._record_event("discard_latest_take", {"episode_id": episode_id})
 
     def save_latest_episode_notes(self, note_text: str) -> None:
         self.last_action_error = ""
@@ -663,6 +707,17 @@ class OperatorConsoleBackend:
 
     def _dataset_info_url(self, dataset_id: str) -> str:
         return f"{self._dataset_base_url()}/datasets/local/{dataset_id}/resolve/main/meta/info.json"
+
+    def _latest_episode_dir(self) -> Path | None:
+        if not self.latest_episode_id:
+            return None
+        return REPO_ROOT / "raw_episodes" / self.latest_episode_id
+
+    def _episode_has_archive(self, episode_dir: Path) -> bool:
+        for child in episode_dir.iterdir():
+            if child.is_dir() and (child / "archive_manifest.json").is_file():
+                return True
+        return False
 
     def _listener_pid(self, port: int, cwd_hint: Path) -> int | None:
         try:
@@ -1255,16 +1310,18 @@ class OperatorConsoleBackend:
             self.latest_conversion_output = "\n".join(process.get_logs()[-40:])
             if exit_code == 0 and self.pending_conversion_dataset_id:
                 self.latest_dataset_id = self.pending_conversion_dataset_id
+                self.latest_converted_episode_id = self.pending_conversion_episode_id
                 self._record_event(
                     "conversion_complete",
                     {
                         "dataset_id": self.pending_conversion_dataset_id,
-                        "episode_id": self.latest_episode_id,
+                        "episode_id": self.pending_conversion_episode_id,
                     },
                 )
             elif exit_code != 0:
                 self.last_action_error = "Convert failed."
             self.pending_conversion_dataset_id = None
+            self.pending_conversion_episode_id = None
         elif name == "recorder":
             if exit_code not in {0, -signal.SIGINT, -signal.SIGTERM, 130, 143}:
                 self.last_action_error = "Recording failed."
@@ -1479,6 +1536,7 @@ class OperatorConsoleBackend:
             "events": self.session_events,
             "latest_episode_id": self.latest_episode_id,
             "latest_dataset_id": self.latest_dataset_id,
+            "latest_converted_episode_id": self.latest_converted_episode_id,
             "latest_viewer_url": self.latest_viewer_url,
             "latest_recording_ok": self.latest_recording_ok,
             "current_session_capture_plan": self.current_session_capture_plan,

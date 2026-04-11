@@ -32,6 +32,25 @@
   padding-bottom: 0.15rem;
 }
 
+.md-content__button--edit-github {
+  align-items: center;
+  color: #7a0019;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 600;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+  text-decoration: none;
+}
+
+.md-content__button--edit-github:hover {
+  color: #5b0013;
+}
+
+.md-content__button--edit-github .md-icon {
+  font-size: 1rem;
+}
+
 .md-nav--primary .md-nav__link--active {
   border-left: 3px solid #ffcc33;
   padding-left: 0.6rem;

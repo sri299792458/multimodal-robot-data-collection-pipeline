@@ -1,0 +1,13 @@
+{% if page.edit_url %}
+  <a
+    href="{{ page.edit_url }}"
+    class="md-content__button md-content__button--edit-github"
+    title="Edit on GitHub"
+    rel="edit"
+  >
+    <span class="md-icon">
+      {% include ".icons/material/github.svg" %}
+    </span>
+    <span>Edit on GitHub</span>
+  </a>
+{% endif %}

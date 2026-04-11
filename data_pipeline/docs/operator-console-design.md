@@ -132,6 +132,8 @@ The operator-facing workflow keeps readiness simple:
 - `Record` readiness follows required-service health and process state
 - post-take checks happen after recording, where they can evaluate the actual
   artifact instead of a snapshot guess
+- the latest raw take can be discarded before conversion if the operator knows
+  it should not be kept
 
 This keeps the console focused on session bring-up and recording, instead of
 adding extra operator steps that can drift away from the live state moments
