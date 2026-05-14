@@ -6,6 +6,7 @@ Use the shared media folders:
 
 - `images/`
 - `videos/`
+- `interactive/`
 
 Keep the folder structure simple and encode the docs section in the file name:
 
@@ -13,7 +14,12 @@ Keep the folder structure simple and encode the docs section in the file name:
 - `setup-operator-console-overview.png`
 - `ops-zeus-usb-port-controller-map.png`
 - `design-episode-manifest-shape.png`
+- `hardware-d405-wrist-camera-geometry/`
 
 Use descriptive file names that explain the content, not the capture date.
 Keep the original capture elsewhere if needed, but store the curated web-doc
 asset here under its stable name.
+
+Only use `interactive/` for small, self-contained docs viewers that are worth
+maintaining with the docs. Include any local third-party license files next to
+vendored browser code.
