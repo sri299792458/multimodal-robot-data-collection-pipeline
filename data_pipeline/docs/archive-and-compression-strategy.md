@@ -1,148 +1,77 @@
 # Archive And Compression Strategy
 
-## Purpose
-
-This page explains why live recording, archive generation, and published export
-are separate stages with different compression policies.
-
-
 ## Core Decision
 
-The pipeline does not try to make the live capture bag also be the final
-storage-optimized artifact.
+Live capture optimizes for recording reliability. Offline archive generation
+creates the smaller, lossless ROS-native artifact used for long-term retention
+and future conversion.
 
-Instead, it separates:
+The stages are:
 
-- raw capture
-- offline archive generation
-- published dataset export
+1. capture one plain MCAP bag
+2. generate and fully verify a lossless archive
+3. publish an aligned LeRobot dataset from the verified archive
 
-That separation is deliberate.
-
-
-## Why Live Capture Stays Simple
-
-The capture path is optimized for:
-
-- recording reliability
-- low runtime overhead
-- faithful raw topic preservation
-- safe post-take debugging
-
-That is why the capture bag stays:
-
-- one bag per demo
-- plain `mcap`
-- untrimmed
-- not rewritten in place after recording
-
-The design assumption is that recording integrity matters more than squeezing
-maximum storage savings out of the first write.
+Conversion falls back to the capture only when a verified archive does not yet
+exist.
 
 
-## Why Archive Is Offline
+## Capture Policy
 
-Archive generation does the work that is too risky or too expensive to put on
-the live recording path:
+The live recorder performs no trim or image transcode. This avoids placing CPU,
+storage-rewrite, or compression failure modes on the demonstration critical
+path.
+
+The capture remains unchanged while archive generation runs. A failed archive
+job can therefore be retried safely.
+
+
+## Archive Policy
+
+`archive_episode.py` performs:
 
 - head/tail trim
-- lossless image transcode
-- MCAP chunk compression
-- archive verification and provenance
+- RGB and tactile conversion to PNG-backed `/compressed` topics
+- depth conversion to PNG-backed `/compressedDepth` topics
+- MCAP zstd chunk compression
+- structural and full decoded-payload verification
+- provenance recording in `archive/archive_manifest.json`
 
-Doing this offline means:
+The current presets are `zstd_fast` and `zstd_small`; `zstd_small` is the
+default.
 
-- the original capture stays preserved if archive generation fails
-- one bad archive job does not corrupt the source-of-truth artifact
-- heavy transcode work does not sit on the demo-to-demo critical path
-
-`archive_episode.py` also writes a separate
-`archive_manifest.json` so trim, transcode, and final archive settings are
-auditable without mutating the raw episode manifest.
-
-
-## Why Compression Policy Depends On Artifact Type
-
-Compression is not one global policy. It depends on what the artifact is for.
-
-### Capture bag
-
-Primary goal:
-
-- trustworthy recording
-
-Preferred properties:
-
-- minimal runtime work
-- simple storage backend
-- no in-place mutation
-
-### Archive bag
-
-Primary goal:
-
-- smaller long-term ROS-native artifact
-
-Preferred properties:
-
-- lossless image compression
-- offline trim
-- MCAP chunk compression
-
-Implementation note:
-
-- `archive_episode.py` exposes `zstd_fast` and `zstd_small`
-- the default archive preset is `zstd_small`
-
-### Published dataset
-
-Primary goal:
-
-- aligned learning artifact
-
-Preferred properties:
-
-- fixed-rate frames
-- model-facing schema
-- copied source provenance
+The archive is accepted as a conversion source only when its manifest records
+`archive_output.verified: true`. Full payload verification checks decoded image
+content, not just topic counts or bag readability.
 
 
-## Why The Archive Path Is Lossless
+## Published Policy
 
-The archive path is designed to stay lossless for the important visual
-modalities.
+The published dataset is optimized for aligned training and review:
 
-That is why the archive path uses:
+- fixed-rate low-dimensional frames
+- RGB/tactile video
+- native LeRobot depth-map video
+- copied source provenance and conversion diagnostics
 
-- RGB and tactile archived with PNG-backed compressed image transport
-- depth archived with lossless `compressedDepth` PNG
+Published RGB/tactile streams use the configured LeRobot video encoder. Native
+depth uses LeRobot's bounded 12-bit quantization, so publication requires
+explicit minimum and maximum depths in meters. Diagnostics report invalid
+zeros, values outside the range, and reconstruction error.
 
-The design reasoning is simple:
-
-- archive should reduce storage cost
-- but it should not give up future debugging or geometry fidelity casually
-
-
-## Why Head/Tail Trim Moved Out Of Recording
-
-Trim is now an archive-time decision, not a record-time mutation.
-
-That avoids two problems:
-
-- recording logic doing too much on the critical path
-- source-of-truth bags being rewritten to fit later storage preferences
-
-The raw capture remains what was recorded.
-The archive is the curated long-term ROS-native derivative.
+The published dataset is not the retention artifact. The verified archive keeps
+lossless visual sensor values needed to republish with different encoder
+settings later.
 
 
-## Design Consequence
+## Deletion Gate
 
-Future work should preserve this artifact logic:
+The capture bag may be removed only after:
 
-- capture first
-- archive later
-- publish separately
+- archive generation completed
+- the archive manifest records successful full payload verification
+- the archive files and episode manifest/notes are retained
 
-If one stage starts trying to impersonate another, the pipeline will become
-harder to trust and harder to debug.
+Publishing a LeRobot dataset alone is not sufficient reason to delete the
+capture, because the published depth representation is intentionally bounded
+and quantized.

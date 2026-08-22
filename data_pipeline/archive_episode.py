@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import heapq
 import hashlib
-import json
 import os
 import random
 import re
@@ -38,6 +37,7 @@ from data_pipeline.pipeline_utils import (  # noqa: E402
 )
 from data_pipeline.archive_verification import (  # noqa: E402
     ArchiveImageTopicPair,
+    verify_archive_payload_roundtrip,
     verify_archive_structure,
 )
 
@@ -724,13 +724,6 @@ def run_image_transport_transcode(
                 managed.log_handle.close()
 
 
-def load_json_if_present(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
@@ -758,7 +751,6 @@ def main(argv: list[str] | None = None) -> int:
     work_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    episode_manifest = load_json_if_present(episode_dir / "episode_manifest.json")
     capture_storage_id = detect_bag_storage_id(capture_bag_dir)
     capture_size_bytes = bag_dir_size_bytes(capture_bag_dir)
     archive_manifest: dict[str, Any] = {
@@ -889,29 +881,42 @@ def main(argv: list[str] | None = None) -> int:
     )
     archive_manifest["archive_output"]["size_bytes"] = final_copy_stats["size_bytes"]
     archive_manifest["archive_output"]["message_count"] = final_copy_stats["message_count"]
-    archive_manifest["archive_output"]["verification"] = verify_archive_structure(
+    image_pairs = [
+        ArchiveImageTopicPair(
+            source_topic=plan.source_topic,
+            archive_topic=plan.output_topic,
+            modality=plan.modality,
+        )
+        for plan in image_plans
+    ]
+    lightweight_verification = verify_archive_structure(
         playback_source_bag_dir,
         playback_storage_id,
         archive_bag_dir,
         "mcap",
         passthrough_topics,
-        [
-            ArchiveImageTopicPair(
-                source_topic=plan.source_topic,
-                archive_topic=plan.output_topic,
-                modality=plan.modality,
-            )
-            for plan in image_plans
-        ],
+        image_pairs,
     )
+    full_payload_verification = verify_archive_payload_roundtrip(
+        playback_source_bag_dir,
+        playback_storage_id,
+        archive_bag_dir,
+        "mcap",
+        image_pairs,
+    )
+    archive_manifest["archive_output"]["verification"] = {
+        "lightweight": lightweight_verification,
+        "full_payload": full_payload_verification,
+    }
     archive_manifest["archive_output"]["verified"] = (
-        archive_manifest["archive_output"]["verification"]["status"] == "ok"
+        lightweight_verification["status"] == "ok" and full_payload_verification["status"] == "ok"
     )
     if not archive_manifest["archive_output"]["verified"]:
         write_json(archive_manifest_path, archive_manifest)
         raise RuntimeError(
-            "Lightweight archive verification failed: "
-            f"{archive_manifest['archive_output']['verification']['errors']}"
+            "Archive verification failed: "
+            f"lightweight={lightweight_verification['errors']}, "
+            f"full_payload={full_payload_verification['errors']}"
         )
     write_json(archive_manifest_path, archive_manifest)
 

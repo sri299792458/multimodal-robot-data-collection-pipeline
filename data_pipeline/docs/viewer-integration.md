@@ -38,6 +38,7 @@ That is why `Open Viewer` owns:
 
 - resolving the current published dataset target
 - ensuring the local dataset server is running
+- ensuring the native-depth video adapter is running
 - starting or restarting the viewer server if needed
 - opening the resolved episode URL
 
@@ -62,10 +63,11 @@ That boundary matters because:
 
 ## Current Local Dataset Serving Model
 
-The current local viewer integration uses two explicit local servers:
+The current local viewer integration uses three explicit local servers:
 
 - a generic viewer server from `lerobot-dataset-visualizer`
 - a read-only dataset server owned by `spark-data-collection`
+- the viewer repo's lazy native-depth video adapter
 
 The dataset server exposes published datasets directly from:
 
@@ -78,13 +80,28 @@ through the URL shape the viewer expects:
 And the backend starts the viewer with:
 
 - `DATASET_URL=<dataset_base_url>/datasets`
+- `VIDEO_BACKEND_URL=<video_adapter_base_url>`
+- `LOCAL_DATASET_ROOT=<spark_repo>/published`
 
 This keeps the dataset truth in one place and removes the hidden mirror state
 that previously lived inside the viewer repo.
 
 By default, each Unix account gets its own local viewer port and its own local
-dataset-server port. That prevents the cross-account failure mode where two
-users on the same machine silently reuse the same `localhost` service.
+dataset-server and video-adapter ports. That prevents the cross-account failure
+mode where two users on the same machine silently reuse another account's
+`localhost` service.
+
+
+## Native Depth Display
+
+Published depth remains one native LeRobot `gray12le` video. Browsers do not
+reliably decode that format directly, so the video adapter lazily creates and
+caches a browser-decodable H.264 colormap for review. It does not modify the
+dataset and does not create a second published depth representation.
+
+The adapter uses the fixed encoder range from `meta/info.json` for a consistent
+colormap. Training and Python loading continue to read the native depth video,
+not the browser cache.
 
 
 ## Remaining Design Debt

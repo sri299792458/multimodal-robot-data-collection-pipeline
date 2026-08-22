@@ -37,6 +37,7 @@ In particular, the viewer setup expects:
 
 - `node`
 - `npm`
+- `python3` with venv support
 
 The script will install `bun` under:
 
@@ -60,6 +61,8 @@ What the script does:
 - runs `bun install --frozen-lockfile`
 - runs `bun run build`
 - verifies that `.next/BUILD_ID` exists
+- creates `lerobot-dataset-visualizer/.venv`
+- installs the viewer's native-depth video-adapter dependencies
 
 That last check prevents partial viewer builds from being treated as ready when
 `.next/` exists but the production build marker does not.
@@ -72,6 +75,7 @@ The operator console still owns viewer startup at runtime.
 
 - checks the current published dataset target
 - ensures the local dataset server is running
+- starts the native-depth video adapter if needed
 - starts the viewer server if needed
 - opens the resolved local episode URL
 
@@ -82,12 +86,15 @@ production bundle.
 The supported viewer contract is local-only:
 
 - the viewer server runs on the same machine as the operator console
-- the dataset server runs on the same machine as the operator console
+- the dataset server and native-depth video adapter run on the same machine as
+  the operator console
 - the browser is opened on that same machine
 - the viewer base URL defaults to an account-local localhost port
 - you can override it with `PIPELINE_VIEWER_BASE_URL` if you need a specific host or port
 - the dataset server base URL also defaults to an account-local localhost port
 - you can override it with `PIPELINE_DATASET_BASE_URL` if you need a specific host or port
+- the video adapter also uses an account-local localhost port
+- you can override it with `PIPELINE_VIEWER_VIDEO_BASE_URL`
 
 ## Next Step
 

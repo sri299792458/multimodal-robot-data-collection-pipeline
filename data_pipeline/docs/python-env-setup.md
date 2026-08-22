@@ -86,9 +86,9 @@ What that script installs:
 - `requirements-converter.txt`
 - `requirements-teleop.txt`
 - `requirements-operator-console.txt`
-- `torch==2.6.0`
-- `torchvision==0.21.0`
-- editable `lerobot` from the sibling workspace checkout
+- `torch==2.7.1`
+- `torchvision==0.22.1`
+- editable `lerobot v0.6.1` from the pinned sibling workspace checkout
 
 That includes the Qt operator console dependency:
 
@@ -172,6 +172,10 @@ import PySide6
 print("PySide6 import OK")
 PY
 ```
+
+The viewer's Python environment is separate. `setup_viewer_env.sh` creates it
+under `../lerobot-dataset-visualizer/.venv` for the lazy native-depth video
+adapter; do not install those service dependencies into the Spark `.venv`.
 
 ## Current Limitations
 

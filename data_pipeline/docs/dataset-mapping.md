@@ -2,25 +2,27 @@
 
 ## Purpose
 
-This document defines how raw episode bags are converted into the published
-LeRobot dataset.
+This document defines how recorded ROS episodes are converted into the
+published LeRobot dataset.
 
-The raw bag preserves asynchronous truth.
-The published dataset is a fixed-rate aligned view of that raw data.
+The verified archive is the preferred ROS source. The capture bag is used until
+that archive exists. The published dataset is a fixed-rate aligned view of the
+selected ROS source.
 
 
 ## Core Design Rule
 
-The published dataset is derived from the raw episode.
+The published dataset is derived from one recorded episode.
 
 That means:
 
-- raw recording preserves asynchronous source truth
+- the ROS source preserves asynchronous topic truth
 - conversion builds one explicit aligned learning view
-- published artifacts must not silently redefine what the raw episode meant
+- published artifacts must not silently redefine what the recorded episode
+  meant
 
-This is why the published layer is allowed to be stricter and smaller than the
-raw layer without pretending the raw layer never existed.
+`--bag-source auto` prefers a fully verified archive and falls back to the
+capture bag. An unverified archive is rejected rather than trusted silently.
 
 
 ## Conversion Profile
@@ -58,6 +60,17 @@ The checked-in policy is intentionally generic:
 That is simpler and more honest than maintaining near-copy profile files only to
 encode embodiment differences.
 
+Depth publication also requires one explicit dataset-wide encoder range:
+
+```yaml
+depth_encoding:
+  depth_min_m: <approved_minimum>
+  depth_max_m: <approved_maximum>
+```
+
+No range is inferred from one episode. Use `--analyze-depth-only` over
+representative recordings before approving these values.
+
 
 ## Raw vs Published
 
@@ -86,6 +99,7 @@ In practice that means:
 - one effective low-dimensional schema
 - one image/depth field set
 - one embodiment and sensor-layout interpretation
+- one native-depth encoder range
 
 Do not append episodes with incompatible published schemas into the same folder.
 
@@ -100,7 +114,7 @@ not:
 
 ## Effective Schema Resolution
 
-For each raw episode:
+For each recorded episode:
 
 1. Read the generic conversion profile.
 2. Read the manifest active-arm set.
@@ -117,7 +131,7 @@ Examples of inconsistent episodes that should fail:
 
 ## Canonical Published Time Grid
 
-For each raw episode:
+For each recorded episode:
 
 1. Load all required published streams.
 2. Compute:
@@ -182,12 +196,29 @@ That ordering must not change across episodes.
 If only one arm is active, only that arm's low-dimensional slice appears in the effective schema.
 
 
+## Native Depth Contract
+
+Each published depth field is a LeRobot video feature with:
+
+- `info.is_depth_map: true`
+- float input values converted to meters using the episode manifest's recorded
+  `depth_scale_meters_per_unit`
+- bounded 12-bit depth encoding
+- encoder metadata stored in `meta/info.json`
+
+Invalid sensor value `0` is counted in diagnostics and decodes to the configured
+minimum. Values outside the approved range are clipped and their fractions are
+reported. The verified archive retains the original lossless values.
+
+
 ## Published Provenance
 
-The published dataset keeps a copy of the raw source snapshot per episode under:
+The published dataset keeps a copy of the episode source snapshot under:
 
 - `meta/spark_source/<episode_id>/episode_manifest.json`
 - `meta/spark_source/<episode_id>/notes.md`
+- `meta/spark_source/<episode_id>/archive_manifest.json` when the archive was
+  used
 
 And the converter writes episode-level conversion artifacts under:
 
@@ -198,8 +229,8 @@ And the converter writes episode-level conversion artifacts under:
 This is deliberate.
 
 Dataset-level metadata alone is not enough to reconstruct the exact episode
-truth later. The copied raw snapshot keeps the learning artifact tied back to
-the original source-of-truth episode.
+truth later. The copied snapshot ties the learning artifact to the recorded
+episode and selected ROS source.
 
 
 ## Observation State Definition
@@ -460,15 +491,18 @@ Support for multiple sensors comes from the raw-first design, not from trying to
 
 ## Conversion Outputs
 
-For each raw episode, conversion produces:
+For each recorded episode, conversion produces:
 
 - one published episode in the shared LeRobot dataset
 - episode-level diagnostics
 - a source snapshot under:
   - `meta/spark_source/<episode_id>/episode_manifest.json`
   - `meta/spark_source/<episode_id>/notes.md`
+- the archive manifest in that source directory when the archive was used
 
-The copied source manifest is the canonical per-episode provenance record inside the published dataset. Dataset-level sidecars like `meta/depth_info.json` are only indexes for the published layout, not replacements for the raw manifest.
+The copied source manifest is the canonical per-episode sensor provenance
+record inside the published dataset. Native depth layout and encoder metadata
+are part of LeRobot's `meta/info.json`.
 
 Diagnostics should include:
 
@@ -476,6 +510,7 @@ Diagnostics should include:
 - number of published frames
 - per-modality alignment error summary
 - count of invalid or dropped frames
+- native-depth zero, clipping, and reconstruction-error summaries
 
 ### Why
 

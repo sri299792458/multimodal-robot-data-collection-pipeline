@@ -57,6 +57,7 @@ DATASET_SERVER_PY = REPO_ROOT / "data_pipeline" / "local_dataset_server.py"
 VIEWER_REPO = WORKSPACE_ROOT / "lerobot-dataset-visualizer"
 VIEWER_BUN = Path.home() / ".bun" / "bin" / "bun"
 VIEWER_BUILD_ID = VIEWER_REPO / ".next" / "BUILD_ID"
+VIEWER_BACKEND_PYTHON = VIEWER_REPO / ".venv" / "bin" / "python"
 
 
 @dataclass
@@ -93,6 +94,7 @@ class OperatorConsoleBackend:
             "recorder": ManagedProcess("recorder", "Recorder"),
             "converter": ManagedProcess("converter", "Converter"),
             "dataset_server": ManagedProcess("dataset_server", "Dataset Server"),
+            "viewer_video": ManagedProcess("viewer_video", "Viewer Video Adapter"),
             "viewer_server": ManagedProcess("viewer_server", "Viewer Server"),
         }
         self.process_lock = threading.Lock()
@@ -643,7 +645,24 @@ class OperatorConsoleBackend:
             "-u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy "
             f"PORT={shlex.quote(str(self._viewer_port()))} "
             f"DATASET_URL={shlex.quote(dataset_url)} "
+            f"VIDEO_BACKEND_URL={shlex.quote(self._viewer_video_base_url())} "
+            f"LOCAL_DATASET_ROOT={shlex.quote(str(self._published_root()))} "
             f"{shlex.quote(str(VIEWER_BUN))} start"
+        )
+
+    def _build_viewer_video_command(self) -> str:
+        if not VIEWER_BACKEND_PYTHON.exists():
+            raise RuntimeError(
+                "Viewer video adapter environment is missing. Run ./data_pipeline/setup_viewer_env.sh first."
+            )
+        return (
+            f"cd {shlex.quote(str(VIEWER_REPO / 'backend'))} && "
+            "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY "
+            "-u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy "
+            "LEROBOT_DEPTH_RANGE=fixed "
+            f"{shlex.quote(str(VIEWER_BACKEND_PYTHON))} -m uvicorn app:app "
+            "--host 127.0.0.1 "
+            f"--port {shlex.quote(str(self._viewer_video_port()))}"
         )
 
     def _build_dataset_server_command(self) -> str:
@@ -673,6 +692,9 @@ class OperatorConsoleBackend:
     def _dataset_base_url(self) -> str:
         return self._local_base_url("PIPELINE_DATASET_BASE_URL", self._default_local_port(30000))
 
+    def _viewer_video_base_url(self) -> str:
+        return self._local_base_url("PIPELINE_VIEWER_VIDEO_BASE_URL", self._default_local_port(40000))
+
     def _port_from_base_url(self, url: str) -> int:
         parsed = urllib.parse.urlparse(url)
         if parsed.port is not None:
@@ -688,6 +710,9 @@ class OperatorConsoleBackend:
 
     def _dataset_port(self) -> int:
         return self._port_from_base_url(self._dataset_base_url())
+
+    def _viewer_video_port(self) -> int:
+        return self._port_from_base_url(self._viewer_video_base_url())
 
     def _viewer_dataset_root(self, dataset_id: str) -> Path:
         return REPO_ROOT / "published" / dataset_id
@@ -793,6 +818,15 @@ class OperatorConsoleBackend:
         dataset_info_url = self._dataset_info_url(dataset_id)
         if not self._url_reachable(dataset_info_url, timeout_s=1.5):
             raise RuntimeError(f"Viewer dataset did not become reachable: {dataset_info_url}")
+
+        self._ensure_managed_http_server(
+            process_name="viewer_video",
+            command=self._build_viewer_video_command(),
+            url=f"{self._viewer_video_base_url()}/api/health",
+            port=self._viewer_video_port(),
+            cwd_hint=VIEWER_REPO / "backend",
+            timeout_s=15.0,
+        )
 
         self._ensure_managed_http_server(
             process_name="viewer_server",

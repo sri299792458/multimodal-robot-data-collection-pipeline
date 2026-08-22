@@ -9,7 +9,7 @@ It applies to both:
 
 The goal is simple:
 
-- convert one raw episode into a published dataset successfully
+- convert one recorded episode into a published dataset successfully
 - verify the expected published files exist
 - stop before local viewer debugging
 
@@ -18,7 +18,7 @@ The goal is simple:
 
 Make sure these are already true:
 
-- at least one raw episode was recorded successfully
+- at least one episode was recorded successfully
 - the `Recorder` card ended at:
   - `Last recording complete`
 - the latest raw episode exists under:
@@ -36,7 +36,35 @@ Normal workflow note:
 - on a personal account, that setup should already be covered by [Personal Account Setup](./personal-account-setup.md)
 
 
-## 1. Choose The Conversion Profile
+## 1. Confirm Native Depth Bounds
+
+Native depth publication requires one approved dataset-wide range in meters.
+The checked-in profile intentionally does not choose that range yet.
+
+Analyze a representative recording before setting it:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source .venv/bin/activate
+python data_pipeline/convert_episode_bag_to_lerobot.py \
+  raw_episodes/<episode_id> \
+  --analyze-depth-only \
+  --analysis-output /tmp/depth-analysis.json
+```
+
+Once approved, add both values to the conversion profile:
+
+```yaml
+depth_encoding:
+  depth_min_m: <approved_minimum>
+  depth_max_m: <approved_maximum>
+```
+
+The same published folder must always use the same depth bounds. Conversion
+refuses to publish depth while either value is missing.
+
+
+## 2. Choose The Conversion Profile
 
 In the operator console, set `Conversion Profile`.
 
@@ -53,7 +81,7 @@ Important rule:
 That keeps one published folder aligned with one conversion contract.
 
 
-## 2. Choose The Published Dataset Target
+## 3. Choose The Published Dataset Target
 
 In the operator console, set `Published Folder`.
 
@@ -76,7 +104,7 @@ Why this exists:
 - the target must therefore be one specific dataset folder
 
 
-## 3. Check The Converter Card
+## 4. Check The Converter Card
 
 After a successful raw recording, the `Converter` card should show:
 
@@ -90,7 +118,7 @@ If it does not:
 - make sure the `Published Folder` field is set
 
 
-## 4. Start Conversion
+## 5. Start Conversion
 
 Click:
 
@@ -102,13 +130,15 @@ What should happen:
 
 - the card should switch to:
   - `Converter running`
-- the latest raw episode id remains the source episode for this conversion
+- the latest episode id remains the source episode for this conversion
+- the verified archive is used automatically when available; otherwise the
+  capture bag is used
 - the published dataset target becomes the destination dataset
 
 You do **not** need to launch `convert_episode_bag_to_lerobot.py` manually in the normal workflow.
 
 
-## 5. Wait For Completion
+## 6. Wait For Completion
 
 When conversion succeeds, the `Converter` card should settle to:
 
@@ -128,7 +158,7 @@ If conversion fails, the card will show:
 In that case, inspect the console output before retrying.
 
 
-## 6. Verify The Published Dataset On Disk
+## 7. Verify The Published Dataset On Disk
 
 From the repository root:
 
@@ -143,14 +173,11 @@ At minimum, a successful conversion should produce:
 - `meta/`
 - `videos/` when image fields are present
 
-If depth was published for this episode, you should also see:
-
-- `depth/`
-- `depth_preview/`
-- `meta/depth_info.json`
+If depth was published, its native LeRobot video lives under `videos/` and its
+feature metadata lives in `meta/info.json`.
 
 
-## 7. Check The Episode-Specific Metadata
+## 8. Check The Episode-Specific Metadata
 
 The converter also writes episode-level metadata under:
 
@@ -162,15 +189,22 @@ That directory should contain:
 - `diagnostics.json`
 - `effective_profile.yaml`
 
-The published dataset also keeps a copy of the raw source snapshot under:
+The published dataset also keeps a copy of the episode source snapshot under:
 
 - `published/<dataset_id>/meta/spark_source/<episode_id>/episode_manifest.json`
 - `published/<dataset_id>/meta/spark_source/<episode_id>/notes.md`
+- `published/<dataset_id>/meta/spark_source/<episode_id>/archive_manifest.json`
+  when conversion used the archive
 
 That copied source snapshot is the provenance record for the published episode.
 
 
-## 8. Optional Quick Sanity Check
+`diagnostics.json` includes `native_depth_validation`, with the recorded scale,
+invalid-zero fraction, encoder clipping fractions, and reconstruction-error
+percentiles.
+
+
+## 9. Optional Quick Sanity Check
 
 You can inspect the published dataset metadata quickly with:
 
@@ -211,7 +245,7 @@ Your first published conversion is successful when:
 - the copied source manifest and notes exist under:
   - `meta/spark_source/<episode_id>/`
 
-At that point, the raw-to-published conversion path is working.
+At that point, the recorded-to-published conversion path is working.
 
 
 ## Next Step

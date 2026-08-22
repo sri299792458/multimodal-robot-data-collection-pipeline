@@ -1,153 +1,108 @@
-# Raw, Published, And Archive Artifacts
+# Capture, Archive, And Published Artifacts
 
 ## Purpose
 
-This page explains the three main artifact types in the pipeline and why they
-are intentionally separate.
+One demonstration moves through three artifacts with different jobs. Recording,
+lossless retention, and training publication stay separate so a failure in one
+stage does not silently damage another.
 
 
-## One Demo, One Raw Episode
+## Episode Folder
 
-The first durable artifact for a take is always:
+Recording creates:
 
-- one raw episode folder under `raw_episodes/<episode_id>/`
+```text
+raw_episodes/<episode_id>/
+├── bag/
+├── episode_manifest.json
+└── notes.md
+```
 
-That folder contains:
-
-- `bag/`
-- `episode_manifest.json`
-- `notes.md`
-
-The raw episode is the source-of-truth record of what happened during the take.
-
-Current raw-episode contents are:
-
-- `bag/`
-- `episode_manifest.json`
-- `notes.md`
+The manifest and notes identify the take across every later artifact. The bag
+is the immediate capture, not automatically the final retained representation.
 
 
-## Artifact Types
+## 1. Capture Bag
 
-### 1. Capture bag
-
-The capture bag is the immediate ROS-native output of recording.
+The capture bag is the direct ROS-native output of recording.
 
 Current policy:
 
-- one bag per demo
-- plain `mcap`
-- no live trim
-- no live bag rewrite
+- one plain MCAP bag per demonstration
+- no live trim or rewrite
+- minimal work on the recording critical path
+- preserve asynchronous topics exactly as received
 
-### Why
-
-Live recording should optimize for:
-
-- reliability
-- faithful topic preservation
-- post-take debugging
-- safe downstream conversion
-
-It should not try to be the final storage-optimized artifact.
+Keep it until archive generation and full payload verification succeed. If
+archive generation fails, the capture remains available for retry and
+debugging.
 
 
-### 2. Archive bag
+## 2. Verified Archive
 
-The archive bag is a derived offline artifact created later from the preserved
-capture bag.
+The archive is the long-term ROS-native artifact.
 
-Its purpose is:
+It contains:
 
-- long-term storage reduction
-- ROS-native playback and inspection
-- lossless compression of visual topics
+- the selected active interval
+- RGB and tactile images as lossless PNG-compressed ROS messages
+- depth as lossless `compressedDepth` PNG
+- MCAP zstd chunk compression
+- `archive/archive_manifest.json` with source, trim, topic mapping, and
+  verification results
 
-### Why archive is offline
+An archive becomes authoritative only after full payload verification confirms
+that every archived image decodes exactly to its source pixels. At that point,
+the capture bag may be deleted according to lab retention policy.
 
-Compression, trim, and transcode add runtime risk during recording. The pipeline
-separates that work so:
+The converter's default `--bag-source auto` behavior is:
 
-- the demo-to-demo critical path stays simple
-- failures in archive generation do not corrupt the original capture
-- capture bags remain available for debugging and conversion
-
-See:
-
-- `data_pipeline/docs/internal/raw-storage.md`
-- `data_pipeline/docs/internal/archive-bag.md`
-
-Current archive outputs live under:
-
-- `raw_episodes/<episode_id>/archive/`
-- `raw_episodes/<episode_id>/archive/bag/`
-- `raw_episodes/<episode_id>/archive/archive_manifest.json`
+1. use the verified archive when it exists
+2. otherwise use the capture bag
+3. reject an archive whose manifest does not record successful verification
 
 
-### 3. Published dataset
+## 3. Published Dataset
 
-The published dataset is the fixed-schema learning artifact under `published/`.
+The published dataset under `published/<dataset_id>/` is the aligned,
+training-facing LeRobot artifact.
 
-It is derived from the raw episode, not from the operator UI state and not from
-the archive bag by default.
+It contains:
 
-Its purpose is:
+- fixed-rate state and action frames
+- RGB/tactile video features
+- native LeRobot depth-map video features in meters
+- LeRobot metadata
+- per-episode conversion diagnostics and source provenance
 
-- fixed-rate aligned training data
-- stable LeRobot-compatible schema
-- long-term provenance for converted episodes
-
-### Why it is separate from archive
-
-The archive bag stays ROS-native.
-The published dataset is model- and tooling-facing.
-
-Keeping them separate avoids a false choice between:
-
-- ROS-native debugging
-- training-ready dataset layout
+Published depth is bounded 12-bit quantized video. It is appropriate for the
+approved learning range, but it is not a lossless replacement for the archive.
 
 
-## Source Of Truth Rule
+## Provenance
 
-The raw episode remains authoritative because it preserves:
+Each converted episode records:
 
-- the original asynchronous topic streams
-- the resolved per-episode manifest snapshot
-- notes attached to the take
+```text
+meta/spark_source/<episode_id>/episode_manifest.json
+meta/spark_source/<episode_id>/notes.md
+meta/spark_source/<episode_id>/archive_manifest.json  # archive source only
+meta/spark_conversion/<episode_id>/diagnostics.json
+meta/spark_conversion/<episode_id>/conversion_summary.json
+meta/spark_conversion/<episode_id>/effective_profile.yaml
+```
 
-The published dataset may copy source provenance, but it is still a derived
-view.
-
-Current conversion artifacts also include:
-
-- `published/<dataset_id>/meta/spark_conversion/<episode_id>/diagnostics.json`
-- `published/<dataset_id>/meta/spark_conversion/<episode_id>/conversion_summary.json`
-- `published/<dataset_id>/meta/spark_conversion/<episode_id>/effective_profile.yaml`
-
-
-## Published Provenance Rule
-
-The published dataset now keeps a copy of the raw source snapshot for each
-converted episode under:
-
-- `meta/spark_source/<episode_id>/episode_manifest.json`
-- `meta/spark_source/<episode_id>/notes.md`
-
-This keeps the learning artifact tied back to the exact raw episode truth
-without pretending that dataset-level metadata alone is enough.
-
-If published depth is enabled for the effective schema, the dataset also carries
-derived sidecars under:
-
-- `published/<dataset_id>/depth/`
-- `published/<dataset_id>/depth_preview/`
-- `published/<dataset_id>/meta/depth_info.json`
+The source manifest preserves sensor identities, intrinsics, and recorded depth
+scales. The archive manifest proves which ROS artifact was used. Conversion
+diagnostics record alignment and native-depth clipping/reconstruction behavior.
 
 
-## Design Consequences
+## Retention Rule
 
-- do not optimize live recording around long-term archive size first
-- do not treat the published dataset as a substitute for the raw episode
-- do not assume the archive bag is interchangeable with the raw capture unless
-  the pipeline is explicitly redesigned around that choice
+- Do not delete a capture before full archive payload verification succeeds.
+- Retain the verified archive when future debugging, recalibration, or
+  republishing must remain possible.
+- Treat the published dataset as a reproducible training derivative, not as
+  the only copy of sensor truth.
+- Keep one depth encoder range for every episode appended to the same published
+  dataset.

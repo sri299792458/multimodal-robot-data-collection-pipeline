@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
-"""Convert one raw V2 rosbag episode into the published LeRobot dataset."""
+"""Convert one recorded episode into a native LeRobot dataset."""
 
 from __future__ import annotations
 
 import argparse
 import copy
-import io
 import json
 import math
 import shutil
@@ -16,17 +15,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import imageio.v2 as imageio
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 import rosbag2_py
 import yaml
 from geometry_msgs.msg import PoseStamped, WrenchStamped
-from PIL import Image as PILImage
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
-from sensor_msgs.msg import Image, JointState
+from sensor_msgs.msg import CompressedImage, Image, JointState
 from std_msgs.msg import Bool
 
 try:
@@ -38,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from data_pipeline.archive_verification import decode_archive_image_to_array  # noqa: E402
 from data_pipeline.pipeline_utils import (  # noqa: E402
     detect_bag_storage_id,
     effective_profile_for_session,
@@ -54,19 +50,23 @@ from data_pipeline.pipeline_utils import (  # noqa: E402
     profile_required_arms,
     write_json,
 )
+from lerobot.configs import DepthEncoderConfig, RGBEncoderConfig  # noqa: E402
+from lerobot.datasets.depth_utils import dequantize_depth, quantize_depth  # noqa: E402
 from lerobot.datasets.lerobot_dataset import LeRobotDataset  # noqa: E402
 
-MAX_DEPTH_U16 = 0x10000
-REALSENSE_COLOR_MAP_STEPS = 4000
-REALSENSE_JET_STOPS = np.asarray(
-    [
-        [0.0, 0.0, 255.0],
-        [0.0, 255.0, 255.0],
-        [255.0, 255.0, 0.0],
-        [255.0, 0.0, 0.0],
-        [50.0, 0.0, 0.0],
-    ],
-    dtype=np.float32,
+DEPTH_U16_VALUE_COUNT = 1 << 16
+DEPTH_REPORT_PERCENTILES = (
+    0.0,
+    0.1,
+    1.0,
+    5.0,
+    25.0,
+    50.0,
+    75.0,
+    95.0,
+    99.0,
+    99.9,
+    100.0,
 )
 
 
@@ -115,9 +115,13 @@ class TopicSeries:
         idx = bisect_left(self.timestamps_ns, target_ns)
         candidates: list[tuple[Any, int]] = []
         if idx < len(self.timestamps_ns):
-            candidates.append((self.values[idx], abs(self.timestamps_ns[idx] - target_ns)))
+            candidates.append(
+                (self.values[idx], abs(self.timestamps_ns[idx] - target_ns))
+            )
         if idx > 0:
-            candidates.append((self.values[idx - 1], abs(self.timestamps_ns[idx - 1] - target_ns)))
+            candidates.append(
+                (self.values[idx - 1], abs(self.timestamps_ns[idx - 1] - target_ns))
+            )
         if not candidates:
             return None
         return min(candidates, key=lambda item: item[1])
@@ -180,11 +184,23 @@ class ActiveInterval:
     end_ns: int
 
 
+@dataclass(frozen=True)
+class BagSource:
+    kind: str
+    bag_dir: Path
+    storage_id: str
+    logical_to_physical_topic: dict[str, str]
+    image_modalities: dict[str, str]
+    archive_manifest_path: Path | None = None
+
+
 def stamp_to_ns(stamp) -> int:
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
 
-def quaternion_to_rpy(x: float, y: float, z: float, w: float) -> tuple[float, float, float]:
+def quaternion_to_rpy(
+    x: float, y: float, z: float, w: float
+) -> tuple[float, float, float]:
     sinr_cosp = 2.0 * (w * x + y * z)
     cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
     roll = math.atan2(sinr_cosp, cosr_cosp)
@@ -204,78 +220,137 @@ def quaternion_to_rpy(x: float, y: float, z: float, w: float) -> tuple[float, fl
 def decode_image_to_rgb(msg: Image) -> np.ndarray:
     encoding = msg.encoding.lower()
     if encoding in {"rgb8", "8uc3"}:
-        array = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+        array = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+            msg.height, msg.width, 3
+        )
         return array.copy()
     if encoding == "bgr8":
-        array = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+        array = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+            msg.height, msg.width, 3
+        )
         return array[:, :, ::-1].copy()
     if encoding == "rgba8":
-        array = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
+        array = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+            msg.height, msg.width, 4
+        )
         return array[:, :, :3].copy()
     if encoding == "bgra8":
-        array = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
+        array = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+            msg.height, msg.width, 4
+        )
         return array[:, :, 2::-1].copy()
     if encoding in {"mono8", "8uc1"}:
         array = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width)
         return np.repeat(array[:, :, None], 3, axis=2)
-    raise ValueError(f"Unsupported image encoding for published RGB conversion: {msg.encoding}")
+    raise ValueError(
+        f"Unsupported image encoding for published RGB conversion: {msg.encoding}"
+    )
 
 
 def decode_image_to_depth(msg: Image) -> np.ndarray:
     encoding = msg.encoding.lower()
     if encoding in {"16uc1", "mono16"}:
-        return np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width).copy()
-    raise ValueError(f"Unsupported image encoding for published depth conversion: {msg.encoding}")
+        dtype = np.dtype(">u2") if bool(msg.is_bigendian) else np.dtype("<u2")
+        row_width = int(msg.width)
+        return (
+            np.frombuffer(msg.data, dtype=dtype)
+            .reshape(int(msg.height), int(msg.step) // 2)[:, :row_width]
+            .astype(np.uint16, copy=True)
+        )
+    raise ValueError(
+        f"Unsupported image encoding for published depth conversion: {msg.encoding}"
+    )
 
 
-def encode_depth_png16(depth: np.ndarray) -> bytes:
-    if depth.dtype != np.uint16:
-        raise ValueError(f"Expected uint16 depth array, got {depth.dtype}")
-    if depth.ndim != 2:
-        raise ValueError(f"Expected 2D depth array, got shape {depth.shape}")
-    image = PILImage.fromarray(depth)
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
+def decode_archive_rgb(msg: CompressedImage, modality: str) -> np.ndarray:
+    image = decode_archive_image_to_array(msg, modality)
+    if image.dtype != np.uint8:
+        raise ValueError(
+            f"Expected uint8 archive image, got {image.dtype} for {modality}"
+        )
+    if image.ndim == 2:
+        image = np.repeat(image[:, :, None], 3, axis=2)
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ValueError(
+            f"Expected HxWx3 archive image, got {image.shape} for {modality}"
+        )
+    return np.ascontiguousarray(image)
 
 
-def build_realsense_color_map_cache() -> np.ndarray:
-    last_stop = REALSENSE_JET_STOPS.shape[0] - 1
-    positions = np.linspace(0.0, float(last_stop), REALSENSE_COLOR_MAP_STEPS + 1, dtype=np.float32)
-    lower = np.floor(positions).astype(np.int32)
-    upper = np.clip(lower + 1, 0, last_stop)
-    local_t = (positions - lower).reshape(-1, 1)
-    cache = REALSENSE_JET_STOPS[lower] * (1.0 - local_t) + REALSENSE_JET_STOPS[upper] * local_t
-    return np.rint(cache).astype(np.uint8)
+def load_archive_manifest(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        archive_manifest = json.load(handle)
+    output = archive_manifest.get("archive_output") or {}
+    verification = output.get("verification") or {}
+    lightweight = verification.get("lightweight") or {}
+    full_payload = verification.get("full_payload") or {}
+    if (
+        output.get("verified") is not True
+        or lightweight.get("status") != "ok"
+        or full_payload.get("status") != "ok"
+    ):
+        raise RuntimeError(f"Archive has not passed full payload verification: {path}")
+    return archive_manifest
 
 
-REALSENSE_JET_CACHE = build_realsense_color_map_cache()
+def resolve_bag_source(
+    episode_dir: Path, logical_topics: set[str], requested: str
+) -> BagSource:
+    raw_bag_dir = episode_dir / "bag"
+    archive_manifest_path = episode_dir / "archive" / "archive_manifest.json"
+    archive_bag_dir = episode_dir / "archive" / "bag"
 
+    use_archive = requested == "archive"
+    if (
+        requested == "auto"
+        and archive_manifest_path.is_file()
+        and archive_bag_dir.is_dir()
+    ):
+        archive_manifest = load_archive_manifest(archive_manifest_path)
+        use_archive = True
+    elif use_archive:
+        if not archive_manifest_path.is_file():
+            raise FileNotFoundError(
+                f"Missing archive manifest: {archive_manifest_path}"
+            )
+        if not archive_bag_dir.is_dir():
+            raise FileNotFoundError(f"Missing archive bag: {archive_bag_dir}")
+        archive_manifest = load_archive_manifest(archive_manifest_path)
 
-def colorize_depth_realsense_preview(depth: np.ndarray) -> np.ndarray:
-    if depth.dtype != np.uint16:
-        raise ValueError(f"Expected uint16 depth array, got {depth.dtype}")
-    if depth.ndim != 2:
-        raise ValueError(f"Expected 2D depth array for preview colorization, got shape {depth.shape}")
+    if use_archive:
+        logical_to_physical = {topic: topic for topic in logical_topics}
+        image_modalities: dict[str, str] = {}
+        for entry in (archive_manifest.get("image_transcode") or {}).get(
+            "source_topics", []
+        ):
+            source_topic = str(entry["source_topic"])
+            if source_topic not in logical_topics:
+                continue
+            logical_to_physical[source_topic] = str(entry["archive_topic"])
+            image_modalities[source_topic] = str(entry["modality"])
+        storage_id = str(
+            (archive_manifest.get("archive_storage") or {}).get("storage_id") or "mcap"
+        )
+        return BagSource(
+            kind="archive",
+            bag_dir=archive_bag_dir,
+            storage_id=storage_id,
+            logical_to_physical_topic=logical_to_physical,
+            image_modalities=image_modalities,
+            archive_manifest_path=archive_manifest_path,
+        )
 
-    histogram = np.bincount(depth.reshape(-1), minlength=MAX_DEPTH_U16).astype(np.int64, copy=False)
-    cumulative = np.empty_like(histogram)
-    cumulative[0] = histogram[0]
-    cumulative[1:] = np.cumsum(histogram[1:], dtype=np.int64)
-    total_colored_pixels = int(cumulative[-1])
-
-    rgb = np.zeros((depth.shape[0], depth.shape[1], 3), dtype=np.uint8)
-    if total_colored_pixels <= 0:
-        return rgb
-
-    valid_mask = depth > 0
-    if not np.any(valid_mask):
-        return rgb
-
-    normalized = cumulative[depth[valid_mask]].astype(np.float32) / float(total_colored_pixels)
-    cache_indices = np.clip((normalized * REALSENSE_COLOR_MAP_STEPS).astype(np.int32), 0, REALSENSE_COLOR_MAP_STEPS)
-    rgb[valid_mask] = REALSENSE_JET_CACHE[cache_indices]
-    return rgb
+    if requested not in {"auto", "raw"}:
+        raise ValueError(f"Unsupported bag source: {requested}")
+    if not raw_bag_dir.is_dir():
+        raise FileNotFoundError(f"Missing raw bag directory: {raw_bag_dir}")
+    return BagSource(
+        kind="raw",
+        bag_dir=raw_bag_dir,
+        storage_id=detect_bag_storage_id(raw_bag_dir),
+        logical_to_physical_topic={topic: topic for topic in logical_topics},
+        image_modalities={},
+    )
 
 
 def extract_message_timestamp_ns(msg: Any, bag_timestamp_ns: int) -> int:
@@ -286,7 +361,13 @@ def extract_message_timestamp_ns(msg: Any, bag_timestamp_ns: int) -> int:
     return stamp_to_ns(stamp) or bag_timestamp_ns
 
 
-def parse_message(topic: str, msg: Any, bag_timestamp_ns: int, parse_value: bool) -> tuple[int, Any]:
+def parse_message(
+    topic: str,
+    msg: Any,
+    bag_timestamp_ns: int,
+    parse_value: bool,
+    image_modality: str | None = None,
+) -> tuple[int, Any]:
     ts_ns = extract_message_timestamp_ns(msg, bag_timestamp_ns)
     if not parse_value:
         return ts_ns, None
@@ -298,11 +379,20 @@ def parse_message(topic: str, msg: Any, bag_timestamp_ns: int, parse_value: bool
     if isinstance(msg, Image):
         return ts_ns, decode_image_to_rgb(msg)
 
+    if isinstance(msg, CompressedImage):
+        if image_modality is None or image_modality == "depth":
+            raise ValueError(
+                f"Archive image modality is missing or invalid for parsed RGB topic {topic}"
+            )
+        return ts_ns, decode_archive_rgb(msg, image_modality)
+
     if isinstance(msg, JointState):
         positions = np.asarray(msg.position, dtype=np.float32)
         if topic.endswith("/joint_state") or topic.endswith("/cmd_joint_state"):
             if positions.shape[0] < 6:
-                raise ValueError(f"Expected at least 6 joint positions on {topic}, got {positions.shape[0]}")
+                raise ValueError(
+                    f"Expected at least 6 joint positions on {topic}, got {positions.shape[0]}"
+                )
             return ts_ns, positions[:6]
         if positions.shape[0] < 1:
             raise ValueError(f"Expected at least 1 gripper position on {topic}")
@@ -365,7 +455,9 @@ def teleop_activity_topic(profile: dict[str, Any]) -> str:
     return str(profile.get("teleop_activity", {}).get("topic", "")).strip()
 
 
-def build_selected_image_specs(profile: dict[str, Any], topics_with_data: set[str]) -> list[dict[str, Any]]:
+def build_selected_image_specs(
+    profile: dict[str, Any], topics_with_data: set[str]
+) -> list[dict[str, Any]]:
     selected_specs: list[dict[str, Any]] = []
     for image_spec in profile["published"]["images"]:
         if image_spec["required"] or image_spec["topic"] in topics_with_data:
@@ -373,7 +465,9 @@ def build_selected_image_specs(profile: dict[str, Any], topics_with_data: set[st
     return selected_specs
 
 
-def build_selected_depth_specs(profile: dict[str, Any], topics_with_data: set[str]) -> list[dict[str, Any]]:
+def build_selected_depth_specs(
+    profile: dict[str, Any], topics_with_data: set[str]
+) -> list[dict[str, Any]]:
     selected_specs: list[dict[str, Any]] = []
     for depth_spec in profile.get("published_depth", []):
         if depth_spec["required"] or depth_spec["topic"] in topics_with_data:
@@ -381,7 +475,12 @@ def build_selected_depth_specs(profile: dict[str, Any], topics_with_data: set[st
     return selected_specs
 
 
-def build_parse_topics(profile: dict[str, Any], topics_to_read: set[str], topic_types: dict[str, str], value_topics: set[str]) -> set[str]:
+def build_parse_topics(
+    profile: dict[str, Any],
+    topics_to_read: set[str],
+    topic_types: dict[str, str],
+    value_topics: set[str],
+) -> set[str]:
     parse_topics = set(value_topics)
     activity_topic = teleop_activity_topic(profile)
     if activity_topic and activity_topic in topics_to_read:
@@ -395,39 +494,60 @@ def build_parse_topics(profile: dict[str, Any], topics_to_read: set[str], topic_
 
 
 def read_topic_series(
-    bag_dir: Path,
+    bag_source: BagSource,
     topics_to_read: set[str],
     parse_topics: set[str],
-    storage_id: str,
 ) -> dict[str, TopicSeries]:
     reader = rosbag2_py.SequentialReader()
-    storage_options = rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id=storage_id)
+    storage_options = rosbag2_py.StorageOptions(
+        uri=str(bag_source.bag_dir), storage_id=bag_source.storage_id
+    )
     converter_options = rosbag2_py.ConverterOptions("", "")
     reader.open(storage_options, converter_options)
 
-    topic_types = {topic.name: topic.type for topic in reader.get_all_topics_and_types()}
-    message_types = {topic: get_message(topic_types[topic]) for topic in topics_to_read if topic in topic_types}
+    physical_topic_types = {
+        topic.name: topic.type for topic in reader.get_all_topics_and_types()
+    }
+    logical_to_physical = {
+        logical_topic: bag_source.logical_to_physical_topic[logical_topic]
+        for logical_topic in topics_to_read
+        if bag_source.logical_to_physical_topic.get(logical_topic)
+        in physical_topic_types
+    }
+    physical_to_logical = {
+        physical: logical for logical, physical in logical_to_physical.items()
+    }
+    message_types = {
+        physical: get_message(physical_topic_types[physical])
+        for physical in physical_to_logical
+    }
     series = {
-        topic: TopicSeries(
-            topic=topic,
-            type_name=topic_types[topic],
+        logical: TopicSeries(
+            topic=logical,
+            type_name=physical_topic_types[physical],
             timestamps_ns=[],
             values=[],
             bag_timestamps_ns=[],
         )
-        for topic in topics_to_read
-        if topic in topic_types
+        for logical, physical in logical_to_physical.items()
     }
 
     while reader.has_next():
-        topic, data, bag_timestamp_ns = reader.read_next()
-        if topic not in series:
+        physical_topic, data, bag_timestamp_ns = reader.read_next()
+        logical_topic = physical_to_logical.get(physical_topic)
+        if logical_topic is None:
             continue
-        msg = deserialize_message(data, message_types[topic])
-        ts_ns, value = parse_message(topic, msg, bag_timestamp_ns, parse_value=topic in parse_topics)
-        series[topic].timestamps_ns.append(ts_ns)
-        series[topic].values.append(value)
-        series[topic].bag_timestamps_ns.append(bag_timestamp_ns)
+        msg = deserialize_message(data, message_types[physical_topic])
+        ts_ns, value = parse_message(
+            logical_topic,
+            msg,
+            bag_timestamp_ns,
+            parse_value=logical_topic in parse_topics,
+            image_modality=bag_source.image_modalities.get(logical_topic),
+        )
+        series[logical_topic].timestamps_ns.append(ts_ns)
+        series[logical_topic].values.append(value)
+        series[logical_topic].bag_timestamps_ns.append(bag_timestamp_ns)
 
     return series
 
@@ -436,9 +556,13 @@ def apply_realsense_metadata_timestamps(series: dict[str, TopicSeries]) -> None:
     image_to_metadata: dict[str, str] = {}
     for topic in series:
         if topic.endswith("/color/image_raw"):
-            image_to_metadata[topic] = topic.replace("/color/image_raw", "/color/metadata")
+            image_to_metadata[topic] = topic.replace(
+                "/color/image_raw", "/color/metadata"
+            )
         elif topic.endswith("/depth/image_rect_raw"):
-            image_to_metadata[topic] = topic.replace("/depth/image_rect_raw", "/depth/metadata")
+            image_to_metadata[topic] = topic.replace(
+                "/depth/image_rect_raw", "/depth/metadata"
+            )
 
     for image_topic, metadata_topic in image_to_metadata.items():
         image_series = series.get(image_topic)
@@ -449,7 +573,9 @@ def apply_realsense_metadata_timestamps(series: dict[str, TopicSeries]) -> None:
             continue
 
         stamp_to_toa_ns: dict[int, list[int]] = {}
-        for ts_ns, value in zip(metadata_series.timestamps_ns, metadata_series.values, strict=False):
+        for ts_ns, value in zip(
+            metadata_series.timestamps_ns, metadata_series.values, strict=False
+        ):
             if not isinstance(value, dict):
                 continue
             time_of_arrival_ms = value.get("time_of_arrival")
@@ -477,7 +603,11 @@ def apply_realsense_metadata_timestamps(series: dict[str, TopicSeries]) -> None:
 
 
 def ensure_series_present(series: dict[str, TopicSeries], topics: list[str]) -> None:
-    missing = [topic for topic in topics if topic not in series or not series[topic].timestamps_ns]
+    missing = [
+        topic
+        for topic in topics
+        if topic not in series or not series[topic].timestamps_ns
+    ]
     if missing:
         raise RuntimeError(f"Bag is missing required topics or samples: {missing}")
 
@@ -496,11 +626,14 @@ def build_effective_profile(
 def build_features(
     effective_profile: dict[str, Any],
     image_shapes: dict[str, tuple[int, int, int]],
+    depth_shapes: dict[str, tuple[int, int, int]],
 ) -> dict[str, dict[str, Any]]:
     features = {
         "observation.state": {
             "dtype": "float32",
-            "shape": (len(effective_profile["published"]["observation_state"]["names"]),),
+            "shape": (
+                len(effective_profile["published"]["observation_state"]["names"]),
+            ),
             "names": effective_profile["published"]["observation_state"]["names"],
         },
         "action": {
@@ -518,11 +651,25 @@ def build_features(
             "shape": shape,
             "names": ["height", "width", "channels"],
         }
+    for depth_spec in effective_profile["published_depth"]:
+        field = depth_spec["field"]
+        features[field] = {
+            "dtype": "video",
+            "shape": depth_shapes[field],
+            "names": ["height", "width", "channels"],
+            "info": {"is_depth_map": True},
+        }
     return features
 
 
 def compare_feature_specs(existing: dict[str, dict], expected: dict[str, dict]) -> None:
-    existing_core = {k: v for k, v in existing.items() if not k.startswith("meta/") and k not in {"index", "episode_index", "task_index", "timestamp", "frame_index"}}
+    existing_core = {
+        k: v
+        for k, v in existing.items()
+        if not k.startswith("meta/")
+        and k
+        not in {"index", "episode_index", "task_index", "timestamp", "frame_index"}
+    }
     if set(existing_core) != set(expected):
         raise RuntimeError(
             "Existing dataset features do not match this episode conversion.\n"
@@ -533,6 +680,8 @@ def compare_feature_specs(existing: dict[str, dict], expected: dict[str, dict]) 
             existing_core[key]["dtype"] != expected[key]["dtype"]
             or tuple(existing_core[key]["shape"]) != tuple(expected[key]["shape"])
             or existing_core[key].get("names") != expected[key].get("names")
+            or bool((existing_core[key].get("info") or {}).get("is_depth_map"))
+            != bool((expected[key].get("info") or {}).get("is_depth_map"))
         ):
             raise RuntimeError(
                 f"Existing dataset feature mismatch for {key}: "
@@ -545,23 +694,45 @@ def get_or_create_dataset(
     dataset_id: str,
     fps: int,
     features: dict[str, dict[str, Any]],
-    vcodec: str,
+    rgb_encoder: RGBEncoderConfig,
+    depth_encoder: DepthEncoderConfig | None,
 ) -> LeRobotDataset:
     info_path = dataset_root / "meta" / "info.json"
     if info_path.is_file():
         dataset = LeRobotDataset.resume(
             repo_id=dataset_id,
             root=dataset_root,
-            vcodec=vcodec,
+            rgb_encoder=rgb_encoder,
+            depth_encoder=depth_encoder,
         )
         if dataset.fps != fps:
-            raise RuntimeError(f"Existing dataset fps {dataset.fps} does not match expected fps {fps}")
+            raise RuntimeError(
+                f"Existing dataset fps {dataset.fps} does not match expected fps {fps}"
+            )
         compare_feature_specs(dataset.meta.features, features)
+        if depth_encoder is not None:
+            for key in dataset.meta.depth_keys:
+                info = dataset.meta.features[key].get("info") or {}
+                existing_min = info.get("video.depth_min")
+                existing_max = info.get("video.depth_max")
+                if existing_min is None or existing_max is None:
+                    raise RuntimeError(
+                        f"Existing depth feature {key} has no native encoder bounds."
+                    )
+                if not math.isclose(
+                    float(existing_min), depth_encoder.depth_min
+                ) or not math.isclose(float(existing_max), depth_encoder.depth_max):
+                    raise RuntimeError(
+                        f"Existing depth encoder bounds for {key} are [{existing_min}, {existing_max}], "
+                        f"not [{depth_encoder.depth_min}, {depth_encoder.depth_max}]."
+                    )
         return dataset
 
     if dataset_root.exists():
         if not dataset_root.is_dir():
-            raise RuntimeError(f"Published dataset target is not a directory: {dataset_root}")
+            raise RuntimeError(
+                f"Published dataset target is not a directory: {dataset_root}"
+            )
         if any(dataset_root.iterdir()):
             raise RuntimeError(
                 "Published dataset folder exists but is not an initialized local dataset.\n"
@@ -576,7 +747,8 @@ def get_or_create_dataset(
         root=dataset_root,
         fps=fps,
         features=features,
-        vcodec=vcodec,
+        rgb_encoder=rgb_encoder,
+        depth_encoder=depth_encoder,
     )
 
 
@@ -623,7 +795,11 @@ def build_active_intervals(
                 interval_start_ns = max(current_start_ns, clamp_start_ns)
                 interval_end_ns = min(ts_ns - 1, clamp_end_ns)
                 if interval_end_ns >= interval_start_ns:
-                    intervals.append(ActiveInterval(start_ns=interval_start_ns, end_ns=interval_end_ns))
+                    intervals.append(
+                        ActiveInterval(
+                            start_ns=interval_start_ns, end_ns=interval_end_ns
+                        )
+                    )
             current_start_ns = None
         elif not current_active and next_active:
             current_start_ns = ts_ns
@@ -633,18 +809,24 @@ def build_active_intervals(
         interval_start_ns = max(current_start_ns, clamp_start_ns)
         interval_end_ns = clamp_end_ns
         if interval_end_ns >= interval_start_ns:
-            intervals.append(ActiveInterval(start_ns=interval_start_ns, end_ns=interval_end_ns))
+            intervals.append(
+                ActiveInterval(start_ns=interval_start_ns, end_ns=interval_end_ns)
+            )
 
     return intervals
 
 
-def filter_grid_to_intervals(grid: list[int], intervals: list[ActiveInterval]) -> list[int]:
+def filter_grid_to_intervals(
+    grid: list[int], intervals: list[ActiveInterval]
+) -> list[int]:
     if not intervals:
         return []
     filtered: list[int] = []
     interval_index = 0
     for t_ns in grid:
-        while interval_index < len(intervals) and t_ns > intervals[interval_index].end_ns:
+        while (
+            interval_index < len(intervals) and t_ns > intervals[interval_index].end_ns
+        ):
             interval_index += 1
         if interval_index >= len(intervals):
             break
@@ -655,7 +837,9 @@ def filter_grid_to_intervals(grid: list[int], intervals: list[ActiveInterval]) -
 
 
 def activity_interval_diagnostics(intervals: list[ActiveInterval]) -> dict[str, Any]:
-    active_duration_ns = sum(interval.end_ns - interval.start_ns for interval in intervals)
+    active_duration_ns = sum(
+        interval.end_ns - interval.start_ns for interval in intervals
+    )
     return {
         "activity_interval_count": len(intervals),
         "activity_intervals_ns": [
@@ -677,10 +861,16 @@ def align_episode(
     arm_order = profile["notes"]["arm_order"]
     fps = int(profile["dataset"]["fps"])
     published = profile["published"]
-    state_age_ns = int(round(float(published["observation_state"].get("max_age_ms", 50)) * 1_000_000.0))
-    action_age_ns = int(round(float(published["action"].get("max_age_ms", 50)) * 1_000_000.0))
+    state_age_ns = int(
+        round(float(published["observation_state"].get("max_age_ms", 50)) * 1_000_000.0)
+    )
+    action_age_ns = int(
+        round(float(published["action"].get("max_age_ms", 50)) * 1_000_000.0)
+    )
     activity_topic = teleop_activity_topic(profile)
-    activity_active_value = bool(profile.get("teleop_activity", {}).get("active_value", True))
+    activity_active_value = bool(
+        profile.get("teleop_activity", {}).get("active_value", True)
+    )
 
     state_sources = published["observation_state"]["sources"]
     action_sources = published["action"]["sources"]
@@ -703,7 +893,11 @@ def align_episode(
     full_grid = ns_grid(t_start_ns, t_end_ns, fps)
     activity_intervals: list[ActiveInterval] = []
     activity_mode = "disabled"
-    if activity_topic and activity_topic in series and series[activity_topic].timestamps_ns:
+    if (
+        activity_topic
+        and activity_topic in series
+        and series[activity_topic].timestamps_ns
+    ):
         activity_intervals = build_active_intervals(
             series[activity_topic],
             active_value=activity_active_value,
@@ -713,7 +907,9 @@ def align_episode(
         activity_mode = "filtered_by_enable"
         grid = filter_grid_to_intervals(full_grid, activity_intervals)
     else:
-        raise RuntimeError("Teleop activity topic is required for conversion but was missing or empty.")
+        raise RuntimeError(
+            "Teleop activity topic is required for conversion but was missing or empty."
+        )
     if not grid:
         raise RuntimeError(
             f"No valid {fps}Hz frame grid can be formed for interval [{t_start_ns}, {t_end_ns}] "
@@ -723,18 +919,20 @@ def align_episode(
     frames: list[dict[str, Any]] = []
     failures: list[AlignmentFailure] = []
     state_alignment: dict[str, list[float]] = {
-        topic: []
-        for arm in arm_order
-        for topic in state_sources[arm].values()
+        topic: [] for arm in arm_order for topic in state_sources[arm].values()
     }
     action_alignment: dict[str, list[float]] = {
-        topic: []
-        for arm in arm_order
-        for topic in action_sources[arm].values()
+        topic: [] for arm in arm_order for topic in action_sources[arm].values()
     }
-    image_alignment: dict[str, list[float]] = {spec["field"]: [] for spec in selected_image_specs}
-    depth_alignment: dict[str, list[float]] = {spec["field"]: [] for spec in selected_depth_specs}
-    depth_selections: dict[str, list[DepthSelection]] = {spec["field"]: [] for spec in selected_depth_specs}
+    image_alignment: dict[str, list[float]] = {
+        spec["field"]: [] for spec in selected_image_specs
+    }
+    depth_alignment: dict[str, list[float]] = {
+        spec["field"]: [] for spec in selected_depth_specs
+    }
+    depth_selections: dict[str, list[DepthSelection]] = {
+        spec["field"]: [] for spec in selected_depth_specs
+    }
 
     state_topic_order = []
     for arm in arm_order:
@@ -770,7 +968,9 @@ def align_episode(
                 break
             value, age_ns = result
             if age_ns > state_age_ns:
-                failure_reason = f"state sample too old for {topic}: {age_ns / 1e6:.2f} ms"
+                failure_reason = (
+                    f"state sample too old for {topic}: {age_ns / 1e6:.2f} ms"
+                )
                 break
             state_alignment[topic].append(age_ns / 1e6)
             state_parts.append(value)
@@ -783,7 +983,9 @@ def align_episode(
                     break
                 value, age_ns = result
                 if age_ns > action_age_ns:
-                    failure_reason = f"action sample too old for {topic}: {age_ns / 1e6:.2f} ms"
+                    failure_reason = (
+                        f"action sample too old for {topic}: {age_ns / 1e6:.2f} ms"
+                    )
                     break
                 action_alignment[topic].append(age_ns / 1e6)
                 action_parts.append(value)
@@ -796,7 +998,9 @@ def align_episode(
                     failure_reason = f"missing nearest image sample for {topic}"
                     break
                 value, skew_ns = result
-                image_skew_ns = int(round(float(image_spec.get("max_skew_ms", 25)) * 1_000_000.0))
+                image_skew_ns = int(
+                    round(float(image_spec.get("max_skew_ms", 25)) * 1_000_000.0)
+                )
                 if skew_ns > image_skew_ns:
                     failure_reason = f"image sample too far from grid for {topic}: {skew_ns / 1e6:.2f} ms"
                     break
@@ -811,7 +1015,9 @@ def align_episode(
                     failure_reason = f"missing nearest depth sample for {topic}"
                     break
                 sample_index, skew_ns = result
-                depth_skew_ns = int(round(float(depth_spec.get("max_skew_ms", 25)) * 1_000_000.0))
+                depth_skew_ns = int(
+                    round(float(depth_spec.get("max_skew_ms", 25)) * 1_000_000.0)
+                )
                 if skew_ns > depth_skew_ns:
                     failure_reason = f"depth sample too far from grid for {topic}: {skew_ns / 1e6:.2f} ms"
                     break
@@ -828,7 +1034,11 @@ def align_episode(
                 )
 
         if failure_reason is not None:
-            failures.append(AlignmentFailure(frame_index=frame_index, timestamp_ns=t_ns, reason=failure_reason))
+            failures.append(
+                AlignmentFailure(
+                    frame_index=frame_index, timestamp_ns=t_ns, reason=failure_reason
+                )
+            )
             continue
 
         state_vector = np.concatenate(state_parts).astype(np.float32)
@@ -856,7 +1066,9 @@ def align_episode(
 
     if failures:
         first_invalid = failures[0].frame_index
-        contiguous_tail = [failure.frame_index for failure in failures] == list(range(first_invalid, len(grid)))
+        contiguous_tail = [failure.frame_index for failure in failures] == list(
+            range(first_invalid, len(grid))
+        )
         if not contiguous_tail:
             raise RuntimeError(
                 "Mid-episode alignment failure encountered.\n"
@@ -882,7 +1094,9 @@ def align_episode(
             "grid_frame_count_before_filter": len(full_grid),
             "grid_frame_count_after_filter": len(grid),
             "inactive_removed_frame_count": len(full_grid) - len(grid),
-            "inactive_removed_duration_s": float((len(full_grid) - len(grid)) / fps) if fps > 0 else 0.0,
+            "inactive_removed_duration_s": float((len(full_grid) - len(grid)) / fps)
+            if fps > 0
+            else 0.0,
             **activity_interval_diagnostics(activity_intervals),
         },
         "published_frame_count": len(frames),
@@ -900,17 +1114,33 @@ def align_episode(
             },
         },
         "alignment_error_ms": {
-            "state_topics": {topic: summarize_errors(values) for topic, values in state_alignment.items()},
-            "action_topics": {topic: summarize_errors(values) for topic, values in action_alignment.items()},
-            "image_fields": {field: summarize_errors(values) for field, values in image_alignment.items()},
-            "depth_fields": {field: summarize_errors(values) for field, values in depth_alignment.items()},
+            "state_topics": {
+                topic: summarize_errors(values)
+                for topic, values in state_alignment.items()
+            },
+            "action_topics": {
+                topic: summarize_errors(values)
+                for topic, values in action_alignment.items()
+            },
+            "image_fields": {
+                field: summarize_errors(values)
+                for field, values in image_alignment.items()
+            },
+            "depth_fields": {
+                field: summarize_errors(values)
+                for field, values in depth_alignment.items()
+            },
         },
         "action_hold_diagnostics": {
             "topics": {
                 topic: {
                     "max_action_age_ms": max(values) if values else 0.0,
-                    "num_frames_over_50ms": int(sum(1 for value in values if value > 50.0)),
-                    "num_frames_over_100ms": int(sum(1 for value in values if value > 100.0)),
+                    "num_frames_over_50ms": int(
+                        sum(1 for value in values if value > 50.0)
+                    ),
+                    "num_frames_over_100ms": int(
+                        sum(1 for value in values if value > 100.0)
+                    ),
                 }
                 for topic, values in action_alignment.items()
             }
@@ -920,7 +1150,9 @@ def align_episode(
     return frames, depth_selections, diagnostics, summary_status
 
 
-def image_shapes_from_frames(frames: list[dict[str, Any]], image_fields: list[str]) -> dict[str, tuple[int, int, int]]:
+def image_shapes_from_frames(
+    frames: list[dict[str, Any]], image_fields: list[str]
+) -> dict[str, tuple[int, int, int]]:
     shapes: dict[str, tuple[int, int, int]] = {}
     first_frame = frames[0]
     for field in image_fields:
@@ -931,42 +1163,76 @@ def image_shapes_from_frames(frames: list[dict[str, Any]], image_fields: list[st
     return shapes
 
 
+def decode_depth_message(msg: Image | CompressedImage) -> np.ndarray:
+    if isinstance(msg, Image):
+        depth = decode_image_to_depth(msg)
+    elif isinstance(msg, CompressedImage):
+        depth = decode_archive_image_to_array(msg, "depth")
+    else:
+        raise TypeError(f"Unsupported depth message type: {type(msg)}")
+    if depth.dtype != np.uint16 or depth.ndim != 2:
+        raise RuntimeError(
+            f"Expected uint16 HxW depth, got {depth.dtype} {depth.shape}"
+        )
+    return np.ascontiguousarray(depth)
+
+
 def extract_depth_arrays(
-    bag_dir: Path,
-    storage_id: str,
+    bag_source: BagSource,
     depth_selections: dict[str, list[DepthSelection]],
 ) -> dict[str, list[np.ndarray]]:
     topic_to_requested_indices: dict[str, set[int]] = {}
     for selections in depth_selections.values():
         for selection in selections:
-            topic_to_requested_indices.setdefault(selection.topic, set()).add(selection.sample_index)
+            topic_to_requested_indices.setdefault(selection.topic, set()).add(
+                selection.sample_index
+            )
 
     if not topic_to_requested_indices:
         return {field: [] for field in depth_selections}
 
+    logical_to_physical = {
+        logical: bag_source.logical_to_physical_topic[logical]
+        for logical in topic_to_requested_indices
+    }
+    physical_to_logical = {
+        physical: logical for logical, physical in logical_to_physical.items()
+    }
     reader = rosbag2_py.SequentialReader()
-    storage_options = rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id=storage_id)
+    storage_options = rosbag2_py.StorageOptions(
+        uri=str(bag_source.bag_dir), storage_id=bag_source.storage_id
+    )
     converter_options = rosbag2_py.ConverterOptions("", "")
     reader.open(storage_options, converter_options)
 
-    topic_types = {topic.name: topic.type for topic in reader.get_all_topics_and_types()}
-    message_types = {
-        topic: get_message(topic_types[topic]) for topic in topic_to_requested_indices if topic in topic_types
+    topic_types = {
+        topic.name: topic.type for topic in reader.get_all_topics_and_types()
     }
+    message_types = {
+        physical: get_message(topic_types[physical])
+        for physical in physical_to_logical
+        if physical in topic_types
+    }
+    missing_physical_topics = sorted(set(physical_to_logical) - set(message_types))
+    if missing_physical_topics:
+        raise RuntimeError(
+            f"Depth topics are missing from {bag_source.kind} bag: {missing_physical_topics}"
+        )
 
     topic_indices = {topic: 0 for topic in topic_to_requested_indices}
     extracted: dict[tuple[str, int], np.ndarray] = {}
 
     while reader.has_next():
-        topic, data, _ = reader.read_next()
-        if topic not in topic_to_requested_indices:
+        physical_topic, data, _ = reader.read_next()
+        logical_topic = physical_to_logical.get(physical_topic)
+        if logical_topic is None:
             continue
-        topic_index = topic_indices[topic]
-        topic_indices[topic] += 1
-        if topic_index not in topic_to_requested_indices[topic]:
+        topic_index = topic_indices[logical_topic]
+        topic_indices[logical_topic] += 1
+        if topic_index not in topic_to_requested_indices[logical_topic]:
             continue
-        msg = deserialize_message(data, message_types[topic])
-        extracted[(topic, topic_index)] = decode_image_to_depth(msg)
+        msg = deserialize_message(data, message_types[physical_topic])
+        extracted[(logical_topic, topic_index)] = decode_depth_message(msg)
 
     rows_by_field: dict[str, list[np.ndarray]] = {}
     for field, selections in depth_selections.items():
@@ -974,178 +1240,207 @@ def extract_depth_arrays(
         for selection in selections:
             key = (selection.topic, selection.sample_index)
             if key not in extracted:
-                raise RuntimeError(f"Missing extracted depth sample for {selection.topic} index={selection.sample_index}")
+                raise RuntimeError(
+                    f"Missing extracted depth sample for {selection.topic} index={selection.sample_index}"
+                )
             rows.append(extracted[key])
         rows_by_field[field] = rows
     return rows_by_field
 
 
-def write_depth_sidecar(
-    dataset_root: Path,
-    dataset_id: str,
-    dataset_episode_index: int,
-    fps: int,
+def resolve_depth_scales(
+    manifest: dict[str, Any],
     depth_specs: list[dict[str, Any]],
-    depth_selections: dict[str, list[DepthSelection]],
-    depth_arrays: dict[str, list[np.ndarray]],
-    depth_preview_summary: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    depth_root = dataset_root / "depth"
-    depth_root.mkdir(parents=True, exist_ok=True)
-
-    field_info: dict[str, Any] = {}
-    episode_indices_present: set[int] = set()
-
-    for depth_spec in depth_specs:
-        field = depth_spec["field"]
-        selections = depth_selections.get(field, [])
-        arrays = depth_arrays.get(field, [])
-        if len(selections) != len(arrays):
+) -> dict[str, float]:
+    sensors = {
+        str(sensor.get("sensor_key", "")).strip(): sensor
+        for sensor in manifest_sensors(manifest)
+        if isinstance(sensor, dict)
+    }
+    scales: dict[str, float] = {}
+    for spec in depth_specs:
+        field = str(spec["field"])
+        sensor_key = str(spec.get("sensor_key", "")).strip()
+        if not sensor_key:
             raise RuntimeError(
-                f"Depth selection/data length mismatch for {field}: selections={len(selections)} arrays={len(arrays)}"
+                f"Depth field {field} has no sensor_key in the effective profile."
             )
-
-        field_dir = depth_root / field / "chunk-000"
-        field_dir.mkdir(parents=True, exist_ok=True)
-        file_path = field_dir / f"file-{dataset_episode_index:03d}.parquet"
-        if file_path.exists():
-            raise RuntimeError(f"Depth sidecar already exists for {field} episode_index={dataset_episode_index}: {file_path}")
-
-        rows = []
-        for selection, depth_array in zip(selections, arrays, strict=False):
-            png_bytes = encode_depth_png16(depth_array)
-            rows.append(
-                {
-                    "episode_index": int(dataset_episode_index),
-                    "frame_index": int(selection.frame_index),
-                    "timestamp": float(selection.timestamp_ns / 1_000_000_000.0),
-                    "png16_bytes": png_bytes,
-                    "height": int(depth_array.shape[0]),
-                    "width": int(depth_array.shape[1]),
-                    "source_topic": selection.topic,
-                }
+        sensor = sensors.get(sensor_key)
+        if sensor is None:
+            raise RuntimeError(
+                f"Depth field {field} references unrecorded sensor {sensor_key}."
             )
-
-        table = pa.Table.from_pylist(rows)
-        pq.write_table(table, file_path)
-        episode_indices_present.add(dataset_episode_index)
-        field_info[field] = {
-            "source_topic": depth_spec["topic"],
-            "unit": str(depth_spec.get("unit", "raw_uint16")),
-            "max_skew_ms": float(depth_spec.get("max_skew_ms", 25)),
-            "path": str(file_path.relative_to(dataset_root)),
-            "row_count": len(rows),
-        }
-
-    info_path = dataset_root / "meta" / "depth_info.json"
-    if info_path.is_file():
-        with info_path.open("r", encoding="utf-8") as handle:
-            depth_info = json.load(handle)
-    else:
-        depth_info = {
-            "dataset_id": dataset_id,
-            "encoding": "png16_gray",
-            "unit": "raw_uint16",
-            "chunking": {
-                "mode": "per_episode_file",
-                "chunk": "chunk-000",
-                "filename_pattern": "file-{episode_index:03d}.parquet",
-            },
-            "episode_indices_present": [],
-            "depth_fields": {},
-        }
-
-    depth_info["dataset_id"] = dataset_id
-    depth_info["alignment_policy"] = {
-        "grid_fps": int(fps),
-        "selector": "nearest",
-    }
-    if depth_preview_summary:
-        depth_info["preview_videos"] = {
-            "encoding": "mp4_h264_rgb8",
-            "chunking": {
-                "mode": "per_episode_file",
-                "chunk": "chunk-000",
-                "filename_pattern": "file-{episode_index:03d}.mp4",
-            },
-            "colorizer": {
-                "source": "librealsense::colorizer",
-                "visual_preset": "Dynamic",
-                "color_scheme": "Jet",
-                "histogram_equalization": True,
-                "zero_depth": "black",
-            },
-        }
-    existing_indices = set(depth_info.get("episode_indices_present", []))
-    existing_indices.update(episode_indices_present)
-    depth_info["episode_indices_present"] = sorted(existing_indices)
-    for field, info in field_info.items():
-        depth_info.setdefault("depth_fields", {})[field] = {
-            "source_topic": info["source_topic"],
-            "unit": info["unit"],
-            "max_skew_ms": info["max_skew_ms"],
-        }
-
-    write_json(info_path, depth_info)
-
-    return {
-        "root": str(depth_root),
-        "info_path": str(info_path),
-        "fields": field_info,
-    }
+        scale_value = sensor.get("depth_scale_meters_per_unit")
+        if scale_value is None:
+            raise RuntimeError(
+                f"Manifest sensor {sensor_key} has no depth_scale_meters_per_unit. "
+                "Native depth conversion requires the scale recorded at capture time."
+            )
+        scale = float(scale_value)
+        if not math.isfinite(scale) or scale <= 0.0:
+            raise RuntimeError(f"Invalid depth scale for {sensor_key}: {scale_value}")
+        scales[field] = scale
+    return scales
 
 
-def write_depth_preview_videos(
-    dataset_root: Path,
-    dataset_episode_index: int,
-    fps: int,
-    depth_specs: list[dict[str, Any]],
+def convert_depth_to_meters(
     depth_arrays: dict[str, list[np.ndarray]],
-) -> dict[str, Any]:
-    preview_root = dataset_root / "depth_preview"
-    preview_root.mkdir(parents=True, exist_ok=True)
+    depth_scales: dict[str, float],
+) -> dict[str, list[np.ndarray]]:
+    return {
+        field: [
+            np.ascontiguousarray(
+                array.astype(np.float32) * np.float32(depth_scales[field])
+            )[:, :, None]
+            for array in arrays
+        ]
+        for field, arrays in depth_arrays.items()
+    }
 
-    field_info: dict[str, Any] = {}
 
-    for depth_spec in depth_specs:
-        field = depth_spec["field"]
-        arrays = depth_arrays.get(field, [])
+def attach_depth_frames(
+    frames: list[dict[str, Any]],
+    metric_depth: dict[str, list[np.ndarray]],
+) -> dict[str, tuple[int, int, int]]:
+    shapes: dict[str, tuple[int, int, int]] = {}
+    for field, arrays in metric_depth.items():
+        if len(arrays) != len(frames):
+            raise RuntimeError(
+                f"Depth frame count mismatch for {field}: {len(arrays)} vs {len(frames)}"
+            )
         if not arrays:
-            continue
-
-        field_dir = preview_root / field / "chunk-000"
-        field_dir.mkdir(parents=True, exist_ok=True)
-        file_path = field_dir / f"file-{dataset_episode_index:03d}.mp4"
-        if file_path.exists():
+            raise RuntimeError(f"No depth frames were extracted for {field}")
+        first_shape = tuple(int(dim) for dim in arrays[0].shape)
+        if len(first_shape) != 3 or first_shape[2] != 1:
             raise RuntimeError(
-                f"Depth preview video already exists for {field} episode_index={dataset_episode_index}: {file_path}"
+                f"Native depth field {field} must have HxWx1 shape, got {first_shape}"
             )
+        if any(tuple(array.shape) != first_shape for array in arrays):
+            raise RuntimeError(f"Depth frame shapes are inconsistent for {field}")
+        shapes[field] = first_shape
+        for frame, array in zip(frames, arrays, strict=True):
+            frame[field] = array
+    return shapes
 
-        writer = imageio.get_writer(
-            file_path,
-            fps=fps,
-            codec="libx264",
-            format="FFMPEG",
-            macro_block_size=None,
-            ffmpeg_log_level="error",
-            ffmpeg_params=["-pix_fmt", "yuv420p"],
+
+def percentile_label(percentile: float) -> str:
+    return f"p{percentile:g}".replace(".", "_")
+
+
+def weighted_percentiles(values: np.ndarray, weights: np.ndarray) -> dict[str, float]:
+    positive = weights > 0
+    values = np.asarray(values[positive], dtype=np.float64)
+    weights = np.asarray(weights[positive], dtype=np.int64)
+    if not len(values):
+        return {}
+    order = np.argsort(values)
+    values = values[order]
+    cumulative = np.cumsum(weights[order], dtype=np.int64)
+    total = int(cumulative[-1])
+    result: dict[str, float] = {}
+    for percentile in DEPTH_REPORT_PERCENTILES:
+        rank = int(math.ceil((percentile / 100.0) * total))
+        index = int(np.searchsorted(cumulative, max(rank, 1), side="left"))
+        result[percentile_label(percentile)] = float(
+            values[min(index, len(values) - 1)]
         )
-        try:
-            for depth_array in arrays:
-                writer.append_data(colorize_depth_realsense_preview(depth_array))
-        finally:
-            writer.close()
+    return result
 
-        field_info[field] = {
-            "source_topic": depth_spec["topic"],
-            "path": str(file_path.relative_to(dataset_root)),
-            "frame_count": len(arrays),
+
+def build_depth_validation_report(
+    depth_specs: list[dict[str, Any]],
+    depth_arrays: dict[str, list[np.ndarray]],
+    depth_scales: dict[str, float],
+    depth_encoder: DepthEncoderConfig | None,
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    raw_values = np.arange(DEPTH_U16_VALUE_COUNT, dtype=np.float32)
+    for spec in depth_specs:
+        field = spec["field"]
+        histogram = np.zeros(DEPTH_U16_VALUE_COUNT, dtype=np.int64)
+        for array in depth_arrays[field]:
+            histogram += np.bincount(array.reshape(-1), minlength=DEPTH_U16_VALUE_COUNT)
+        total_pixels = int(histogram.sum())
+        zero_pixels = int(histogram[0])
+        valid_histogram = histogram[1:]
+        valid_pixels = int(valid_histogram.sum())
+        scale = depth_scales[field]
+        metric_values = raw_values[1:] * np.float32(scale)
+        report: dict[str, Any] = {
+            "sensor_key": spec["sensor_key"],
+            "source_topic": spec["topic"],
+            "depth_scale_meters_per_unit": scale,
+            "frame_count": len(depth_arrays[field]),
+            "total_pixel_count": total_pixels,
+            "zero_pixel_count": zero_pixels,
+            "zero_fraction": float(zero_pixels / total_pixels) if total_pixels else 0.0,
+            "valid_depth_percentiles_m": weighted_percentiles(
+                metric_values, valid_histogram
+            ),
         }
+        if depth_encoder is not None and valid_pixels:
+            below = int(valid_histogram[metric_values < depth_encoder.depth_min].sum())
+            above = int(valid_histogram[metric_values > depth_encoder.depth_max].sum())
+            quantized = quantize_depth(
+                metric_values[None, :],
+                depth_min=depth_encoder.depth_min,
+                depth_max=depth_encoder.depth_max,
+                shift=depth_encoder.shift,
+                use_log=depth_encoder.use_log,
+                video_backend=None,
+                input_unit="m",
+            )
+            reconstructed = dequantize_depth(
+                quantized,
+                depth_min=depth_encoder.depth_min,
+                depth_max=depth_encoder.depth_max,
+                shift=depth_encoder.shift,
+                use_log=depth_encoder.use_log,
+                output_unit="m",
+                output_tensor=False,
+            )
+            errors_mm = (
+                np.abs(np.asarray(reconstructed).reshape(-1) - metric_values) * 1000.0
+            )
+            report["encoder"] = {
+                "depth_min_m": depth_encoder.depth_min,
+                "depth_max_m": depth_encoder.depth_max,
+                "shift_m": depth_encoder.shift,
+                "use_log": depth_encoder.use_log,
+                "valid_fraction_below_min": float(below / valid_pixels),
+                "valid_fraction_above_max": float(above / valid_pixels),
+                "reconstruction_error_percentiles_mm": weighted_percentiles(
+                    errors_mm, valid_histogram
+                ),
+                "invalid_zero_behavior": "decoded_as_depth_min",
+            }
+        fields[field] = report
+    return {"native_depth_unit": "m", "fields": fields}
 
-    return {
-        "root": str(preview_root),
-        "fields": field_info,
-    }
+
+def make_depth_encoder(
+    depth_min_m: float | None, depth_max_m: float | None
+) -> DepthEncoderConfig | None:
+    if (depth_min_m is None) != (depth_max_m is None):
+        raise RuntimeError("Pass both --depth-min-m and --depth-max-m, or neither.")
+    if depth_min_m is None or depth_max_m is None:
+        return None
+    if not math.isfinite(depth_min_m) or not math.isfinite(depth_max_m):
+        raise RuntimeError("Depth encoder bounds must be finite meters.")
+    if depth_min_m >= depth_max_m:
+        raise RuntimeError("--depth-min-m must be less than --depth-max-m.")
+    return DepthEncoderConfig(depth_min=depth_min_m, depth_max=depth_max_m)
+
+
+def resolve_depth_encoder(
+    profile: dict[str, Any],
+    cli_depth_min_m: float | None,
+    cli_depth_max_m: float | None,
+) -> DepthEncoderConfig | None:
+    if cli_depth_min_m is not None or cli_depth_max_m is not None:
+        return make_depth_encoder(cli_depth_min_m, cli_depth_max_m)
+    config = profile.get("depth_encoding") or {}
+    return make_depth_encoder(config.get("depth_min_m"), config.get("depth_max_m"))
 
 
 def write_conversion_artifacts(
@@ -1157,7 +1452,9 @@ def write_conversion_artifacts(
     artifact_dir.mkdir(parents=True, exist_ok=True)
     write_json(artifact_dir / "diagnostics.json", diagnostics)
     write_json(artifact_dir / "conversion_summary.json", summary)
-    with (artifact_dir / "effective_profile.yaml").open("w", encoding="utf-8") as handle:
+    with (artifact_dir / "effective_profile.yaml").open(
+        "w", encoding="utf-8"
+    ) as handle:
         yaml.safe_dump(effective_profile, handle, sort_keys=False)
 
 
@@ -1165,6 +1462,7 @@ def copy_source_snapshot(
     dataset_root: Path,
     episode_dir: Path,
     episode_id: str,
+    bag_source: BagSource,
 ) -> dict[str, str | None]:
     source_root = dataset_root / "meta" / "spark_source" / episode_id
     source_root.mkdir(parents=True, exist_ok=True)
@@ -1180,10 +1478,17 @@ def copy_source_snapshot(
         shutil.copy2(notes_src, notes_dst)
         notes_path = str(notes_dst.relative_to(dataset_root))
 
+    archive_manifest_path: str | None = None
+    if bag_source.archive_manifest_path is not None:
+        archive_manifest_dst = source_root / "archive_manifest.json"
+        shutil.copy2(bag_source.archive_manifest_path, archive_manifest_dst)
+        archive_manifest_path = str(archive_manifest_dst.relative_to(dataset_root))
+
     return {
         "root": str(source_root.relative_to(dataset_root)),
         "episode_manifest_path": str(manifest_dst.relative_to(dataset_root)),
         "notes_path": notes_path,
+        "archive_manifest_path": archive_manifest_path,
     }
 
 
@@ -1193,7 +1498,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", default="")
     parser.add_argument("--published-dataset-id", default="")
     parser.add_argument("--published-root", type=Path, default=REPO_ROOT / "published")
-    parser.add_argument("--vcodec", default="auto")
+    parser.add_argument(
+        "--bag-source", choices=("auto", "raw", "archive"), default="auto"
+    )
+    parser.add_argument("--vcodec", default="h264")
+    parser.add_argument("--depth-min-m", type=float)
+    parser.add_argument("--depth-max-m", type=float)
+    parser.add_argument("--analyze-depth-only", action="store_true")
+    parser.add_argument("--analysis-output", type=Path)
     parser.add_argument("--skip-validate-load", action="store_true")
     return parser
 
@@ -1204,11 +1516,8 @@ def main(argv: list[str] | None = None) -> int:
 
     episode_dir = args.episode_dir.resolve()
     manifest_path = episode_dir / "episode_manifest.json"
-    bag_dir = episode_dir / "bag"
     if not manifest_path.is_file():
         raise FileNotFoundError(f"Missing manifest: {manifest_path}")
-    if not bag_dir.is_dir():
-        raise FileNotFoundError(f"Missing bag directory: {bag_dir}")
 
     manifest = read_manifest(manifest_path)
     profile_ref = args.profile or manifest_profile_name(manifest)
@@ -1218,10 +1527,15 @@ def main(argv: list[str] | None = None) -> int:
             f"Manifest profile={manifest_profile_name(manifest)} does not match profile {profile['profile_name']}"
         )
     manifest_arms = manifest_active_arms(manifest)
-    normalized_manifest_arms = normalize_active_arms(manifest_arms) if manifest_arms else []
+    normalized_manifest_arms = (
+        normalize_active_arms(manifest_arms) if manifest_arms else []
+    )
     if manifest_arms:
         normalized_profile_arms = profile_required_arms(profile)
-        if normalized_profile_arms and normalized_manifest_arms != normalized_profile_arms:
+        if (
+            normalized_profile_arms
+            and normalized_manifest_arms != normalized_profile_arms
+        ):
             raise RuntimeError(
                 f"Manifest active_arms {normalized_manifest_arms} do not match profile arms {normalized_profile_arms}"
             )
@@ -1231,20 +1545,72 @@ def main(argv: list[str] | None = None) -> int:
         for sensor in manifest_sensors(manifest)
         if isinstance(sensor, dict)
     ]
-    effective_profile = effective_profile_for_session(profile, normalized_manifest_arms, recorded_sensor_keys)
+    effective_profile = effective_profile_for_session(
+        profile, normalized_manifest_arms, recorded_sensor_keys
+    )
 
     topic_types = manifest_topic_types(manifest)
     all_topics_to_read = set(topic_types)
+    bag_source = resolve_bag_source(episode_dir, all_topics_to_read, args.bag_source)
     value_topics = build_value_topics(effective_profile) & all_topics_to_read
-    parse_topics = build_parse_topics(effective_profile, all_topics_to_read, topic_types, value_topics)
-    bag_storage_id = detect_bag_storage_id(bag_dir)
-    series = read_topic_series(bag_dir, all_topics_to_read, parse_topics, storage_id=bag_storage_id)
+    parse_topics = build_parse_topics(
+        effective_profile, all_topics_to_read, topic_types, value_topics
+    )
+    series = read_topic_series(bag_source, all_topics_to_read, parse_topics)
     apply_realsense_metadata_timestamps(series)
-    topics_with_data = {topic for topic, values in series.items() if values.timestamps_ns}
+    topics_with_data = {
+        topic for topic, values in series.items() if values.timestamps_ns
+    }
 
-    selected_image_specs = build_selected_image_specs(effective_profile, topics_with_data)
-    selected_depth_specs = build_selected_depth_specs(effective_profile, topics_with_data)
-    effective_profile = build_effective_profile(effective_profile, selected_image_specs, selected_depth_specs)
+    selected_image_specs = build_selected_image_specs(
+        effective_profile, topics_with_data
+    )
+    selected_depth_specs = build_selected_depth_specs(
+        effective_profile, topics_with_data
+    )
+    effective_profile = build_effective_profile(
+        effective_profile, selected_image_specs, selected_depth_specs
+    )
+
+    depth_encoder = resolve_depth_encoder(
+        effective_profile, args.depth_min_m, args.depth_max_m
+    )
+    if args.analyze_depth_only:
+        if not selected_depth_specs:
+            raise RuntimeError("This episode has no selected depth streams to analyze.")
+        all_depth_selections = {
+            spec["field"]: [
+                DepthSelection(
+                    field=spec["field"],
+                    topic=spec["topic"],
+                    sample_index=index,
+                    frame_index=index,
+                    timestamp_ns=timestamp_ns,
+                    skew_ms=0.0,
+                )
+                for index, timestamp_ns in enumerate(
+                    series[spec["topic"]].timestamps_ns
+                )
+            ]
+            for spec in selected_depth_specs
+        }
+        depth_arrays = extract_depth_arrays(bag_source, all_depth_selections)
+        depth_scales = resolve_depth_scales(manifest, selected_depth_specs)
+        depth_validation = build_depth_validation_report(
+            selected_depth_specs,
+            depth_arrays,
+            depth_scales,
+            depth_encoder,
+        )
+        depth_validation["selection"] = "all_recorded_depth_frames"
+        if args.analysis_output is not None:
+            output_path = args.analysis_output.expanduser().resolve()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            write_json(output_path, depth_validation)
+            print(f"Depth analysis written to {output_path}")
+        else:
+            print(json.dumps(depth_validation, indent=2, sort_keys=True))
+        return 0
 
     frames, depth_selections, alignment_diagnostics, summary_status = align_episode(
         series=series,
@@ -1257,22 +1623,46 @@ def main(argv: list[str] | None = None) -> int:
 
     image_fields = [spec["field"] for spec in selected_image_specs]
     image_shapes = image_shapes_from_frames(frames, image_fields)
-    features = build_features(effective_profile, image_shapes)
+    depth_arrays = extract_depth_arrays(bag_source, depth_selections)
+    depth_scales = resolve_depth_scales(manifest, selected_depth_specs)
+
+    depth_validation = build_depth_validation_report(
+        selected_depth_specs,
+        depth_arrays,
+        depth_scales,
+        depth_encoder,
+    )
+
+    if selected_depth_specs and depth_encoder is None:
+        raise RuntimeError(
+            "Native depth publication requires depth_encoding.depth_min_m and "
+            "depth_encoding.depth_max_m in the profile, or both CLI overrides. "
+            "Run --analyze-depth-only before choosing the dataset-wide range."
+        )
+
+    metric_depth = convert_depth_to_meters(depth_arrays, depth_scales)
+    depth_shapes = attach_depth_frames(frames, metric_depth)
+    features = build_features(effective_profile, image_shapes, depth_shapes)
 
     dataset_id = args.published_dataset_id
     if not dataset_id:
         raise RuntimeError("Conversion requires --published-dataset-id.")
     dataset_root = args.published_root / dataset_id
-    artifact_dir = dataset_root / "meta" / "spark_conversion" / manifest_episode_id(manifest)
+    artifact_dir = (
+        dataset_root / "meta" / "spark_conversion" / manifest_episode_id(manifest)
+    )
     if artifact_dir.exists():
-        raise RuntimeError(f"Conversion artifacts already exist for {manifest_episode_id(manifest)} at {artifact_dir}")
+        raise RuntimeError(
+            f"Conversion artifacts already exist for {manifest_episode_id(manifest)} at {artifact_dir}"
+        )
 
     dataset = get_or_create_dataset(
         dataset_root=dataset_root,
         dataset_id=dataset_id,
         fps=int(effective_profile["dataset"]["fps"]),
         features=features,
-        vcodec=args.vcodec,
+        rgb_encoder=RGBEncoderConfig(vcodec=args.vcodec),
+        depth_encoder=depth_encoder,
     )
     dataset_episode_index = dataset.meta.total_episodes
 
@@ -1280,7 +1670,6 @@ def main(argv: list[str] | None = None) -> int:
         for frame in frames:
             dataset.add_frame(frame)
         dataset.save_episode()
-        dataset.finalize()
     finally:
         dataset.finalize()
 
@@ -1288,40 +1677,23 @@ def main(argv: list[str] | None = None) -> int:
         reloaded = LeRobotDataset(
             repo_id=dataset_id,
             root=dataset_root,
-            download_videos=False,
+            episodes=[dataset_episode_index],
+            depth_output_unit="m",
         )
+        sample = reloaded[0]
+        for field, shape in depth_shapes.items():
+            value = sample[field]
+            if tuple(value.shape) != (shape[2], shape[0], shape[1]):
+                raise RuntimeError(
+                    f"Reloaded depth shape mismatch for {field}: {tuple(value.shape)}"
+                )
         reloaded.finalize()
-
-    depth_sidecar_summary: dict[str, Any] | None = None
-    depth_preview_summary: dict[str, Any] | None = None
-    if selected_depth_specs:
-        depth_arrays = extract_depth_arrays(
-            bag_dir=bag_dir,
-            storage_id=bag_storage_id,
-            depth_selections=depth_selections,
-        )
-        depth_preview_summary = write_depth_preview_videos(
-            dataset_root=dataset_root,
-            dataset_episode_index=dataset_episode_index,
-            fps=int(effective_profile["dataset"]["fps"]),
-            depth_specs=selected_depth_specs,
-            depth_arrays=depth_arrays,
-        )
-        depth_sidecar_summary = write_depth_sidecar(
-            dataset_root=dataset_root,
-            dataset_id=dataset_id,
-            dataset_episode_index=dataset_episode_index,
-            fps=int(effective_profile["dataset"]["fps"]),
-            depth_specs=selected_depth_specs,
-            depth_selections=depth_selections,
-            depth_arrays=depth_arrays,
-            depth_preview_summary=depth_preview_summary,
-        )
 
     source_snapshot = copy_source_snapshot(
         dataset_root=dataset_root,
         episode_dir=episode_dir,
         episode_id=manifest_episode_id(manifest),
+        bag_source=bag_source,
     )
 
     diagnostics = {
@@ -1330,11 +1702,19 @@ def main(argv: list[str] | None = None) -> int:
         "dataset_root": str(dataset_root),
         "dataset_episode_index": dataset_episode_index,
         "clock_policy": manifest_clock_policy(manifest),
-        "bag_storage_id": bag_storage_id,
+        "bag_source": {
+            "kind": bag_source.kind,
+            "bag_dir": str(bag_source.bag_dir),
+            "storage_id": bag_source.storage_id,
+            "archive_manifest_path": str(bag_source.archive_manifest_path)
+            if bag_source.archive_manifest_path
+            else None,
+        },
         "summary_status": summary_status,
-        "topic_diagnostics": {topic: series[topic].diagnostics() for topic in sorted(series)},
-        "depth_sidecar": depth_sidecar_summary,
-        "depth_preview": depth_preview_summary,
+        "topic_diagnostics": {
+            topic: series[topic].diagnostics() for topic in sorted(series)
+        },
+        "native_depth_validation": depth_validation,
         "source_snapshot": source_snapshot,
         **alignment_diagnostics,
     }
@@ -1343,13 +1723,13 @@ def main(argv: list[str] | None = None) -> int:
         "dataset_id": dataset_id,
         "dataset_root": str(dataset_root),
         "dataset_episode_index": dataset_episode_index,
-        "bag_storage_id": bag_storage_id,
+        "bag_source": bag_source.kind,
+        "bag_storage_id": bag_source.storage_id,
         "published_frame_count": len(frames),
         "status": summary_status,
         "selected_image_fields": image_fields,
         "selected_depth_fields": [spec["field"] for spec in selected_depth_specs],
-        "depth_sidecar_root": depth_sidecar_summary["root"] if depth_sidecar_summary else None,
-        "depth_preview_root": depth_preview_summary["root"] if depth_preview_summary else None,
+        "native_depth": bool(selected_depth_specs),
         "source_snapshot": source_snapshot,
     }
     write_conversion_artifacts(artifact_dir, diagnostics, effective_profile, summary)

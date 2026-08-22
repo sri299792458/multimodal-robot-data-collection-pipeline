@@ -61,6 +61,7 @@ cd ~/spark-workspace
 
 git clone https://github.com/RPM-lab-UMN/spark-data-collection.git
 git clone https://github.com/huggingface/lerobot.git
+git -C lerobot switch --detach v0.6.1
 git clone https://github.com/gelsightinc/gsrobotics.git
 git clone https://github.com/RPM-lab-UMN/lerobot-dataset-visualizer.git
 git clone https://github.com/IntelRealSense/librealsense.git
@@ -87,6 +88,11 @@ That affects:
 - GelSight bridge imports
 - viewer launch from the operator console
 - RealSense runtime setup
+
+The LeRobot checkout is pinned to `v0.6.1` (`7e241bd630a3719a56157a497ce5d08f244784f1`).
+That is the tested release for native depth-map storage and loading. The
+environment setup script stops with an actionable error if the sibling checkout
+is at a different revision.
 
 ## RealSense Version Pin
 
@@ -120,6 +126,11 @@ The lab-maintained viewer checkout should use:
   - `huggingface/lerobot-dataset-visualizer`
 
 If someone only needs to use the viewer, cloning the lab fork is enough. The `upstream` remote is only needed when maintaining the fork.
+
+The lab fork must include the native-depth viewer and lazy video-adapter code.
+`setup_viewer_env.sh` checks for that capability before building, so an older
+checkout fails with an update instruction instead of displaying blank depth
+tiles.
 
 ## Next Step
 

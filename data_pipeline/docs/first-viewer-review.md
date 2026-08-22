@@ -63,6 +63,7 @@ What should happen:
 
 - the backend checks that the published dataset exists
 - it ensures the local dataset server is running
+- it starts the local native-depth video adapter if needed
 - it starts the local viewer server if needed
 - it opens the resolved local episode URL for the latest episode in that dataset
 
@@ -90,7 +91,7 @@ A successful first viewer review means:
 - the browser opens the local dataset page
 - the newest episode loads
 - RGB streams render
-- depth preview streams render if depth was published
+- native depth streams render with a colormap if depth was published
 - the episode-level charts and metadata load without obvious missing-data errors
 
 
@@ -105,6 +106,7 @@ Typical causes are:
   - expected at:
     - `~/.bun/bin/bun`
 - the production viewer bundle was never built
+- the viewer video-adapter environment was never prepared
 - the published dataset target does not exist on disk
 
 In that case, go back to:
@@ -153,7 +155,7 @@ manually from the sibling repo.
 Important:
 
 - this only makes sense after at least one `Open Viewer` attempt
-- the console path is what starts both local services for the selected dataset
+- the console path is what starts the local services for the selected dataset
 - replace `<viewer_base_url>` with the URL shown in the operator console if you are not using the default account-local port
 - replace `<dataset_base_url>` with the local dataset-server base URL if you overrode it
 
@@ -163,6 +165,8 @@ Manual start:
 cd ~/spark-workspace/lerobot-dataset-visualizer
 env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy \
 DATASET_URL=<dataset_base_url>/datasets \
+VIDEO_BACKEND_URL=<video_backend_url> \
+LOCAL_DATASET_ROOT=~/spark-workspace/spark-data-collection/published \
 PORT=<viewer_port> \
 ~/.bun/bin/bun start
 ```
@@ -179,7 +183,7 @@ Your first viewer review is successful when:
 - `Open Viewer` opens a local dataset URL
 - the newest episode page loads
 - RGB streams render
-- depth preview renders when depth exists
+- native depth renders when depth exists
 - the dataset shown in the browser matches the dataset in the operator console
 
 At that point, the basic end-to-end local workflow is working:

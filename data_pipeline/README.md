@@ -64,20 +64,6 @@ Curated operations and debugging pages are:
 - [operations-and-debugging.md](./docs/operations-and-debugging.md)
 - [usb-port-and-controller-mapping.md](./docs/usb-port-and-controller-mapping.md)
 
-Internal implementation references still live here:
-
-- [V2_SPEC.md](./V2_SPEC.md)
-- [V1_SPEC.md](./V1_SPEC.md) archived
-- [notes/running-notes.md](./notes/running-notes.md)
-- [docs/internal/raw-storage.md](./docs/internal/raw-storage.md)
-- [docs/internal/archive-bag.md](./docs/internal/archive-bag.md)
-- [docs/internal/depth-storage.md](./docs/internal/depth-storage.md)
-- [docs/internal/operator-console-spec.md](./docs/internal/operator-console-spec.md)
-- [docs/internal/raiden-reference-analysis.md](./docs/internal/raiden-reference-analysis.md)
-- [docs/internal/teleop-runtime-refactor-spec.md](./docs/internal/teleop-runtime-refactor-spec.md)
-- [docs/internal/current-lightning-gelsight-runbook.md](./docs/internal/current-lightning-gelsight-runbook.md)
-- [docs/internal/replay.md](./docs/internal/replay.md)
-
 The current reference frontend is the Qt implementation:
 
 ```bash
@@ -99,12 +85,14 @@ The current system provides:
 
 - stable `/spark/...` topic contract for robot, camera, tactile, and teleop-activity streams
 - raw episode recording as one rosbag per demo
-- raw-to-LeRobot conversion for the current bimanual `multisensor_20hz` profile
+- verified-archive-to-LeRobot conversion with capture-bag fallback
+- native LeRobot depth-map publication with explicit encoder bounds
 - dummy-data eval path
 - direct `pyrealsense2` ROS2 publisher for RealSense RGB+D topics
 - GelSight ROS2 bridge process for the declared tactile topics
 
-The remaining work is live hardware validation with the actual full sensor set attached.
+Depth encoder bounds still require approval from representative D405 and L515
+recordings before they are added to the shared profile.
 
 
 ## Calibration
@@ -289,20 +277,38 @@ source .venv/bin/activate
 python data_pipeline/convert_episode_bag_to_lerobot.py \
   raw_episodes/<episode_id> \
   --published-dataset-id <published_dataset_folder_name> \
-  --published-root published
+  --published-root published \
+  --depth-min-m <approved_minimum> \
+  --depth-max-m <approved_maximum>
 ```
 
-If the selected profile declares `published_depth`, the converter also writes a lossless depth sidecar under:
+`--bag-source auto` is the default. It uses the verified archive bag when one
+exists and otherwise reads the capture bag. An archive is accepted only when
+`archive_manifest.json` records successful verification.
 
-- `published/<dataset_id>/depth/`
-- `published/<dataset_id>/meta/depth_info.json`
+Depth is published as a native LeRobot depth-map video feature in meters. Its
+encoder bounds must be explicit, either through the two CLI arguments above or
+through `depth_encoding.depth_min_m` and `depth_encoding.depth_max_m` in the
+conversion profile. Inspect a recording before choosing bounds:
+
+```bash
+python data_pipeline/convert_episode_bag_to_lerobot.py \
+  raw_episodes/<episode_id> \
+  --analyze-depth-only \
+  --analysis-output /tmp/depth-analysis.json
+```
 
 The published dataset also keeps a per-episode source snapshot under:
 
 - `published/<dataset_id>/meta/spark_source/<episode_id>/episode_manifest.json`
 - `published/<dataset_id>/meta/spark_source/<episode_id>/notes.md`
+- `published/<dataset_id>/meta/spark_source/<episode_id>/archive_manifest.json`
+  when the archive was the conversion source
 
-`meta/depth_info.json` is only the dataset-level index for the depth sidecar layout. The copied source manifest remains the canonical place for per-sensor metadata such as RealSense intrinsics and `depth_scale_meters_per_unit`.
+The copied episode manifest remains the canonical place for recorded sensor
+metadata such as RealSense intrinsics and
+`depth_scale_meters_per_unit`. Conversion diagnostics report invalid zero
+pixels, clipping fractions, and depth reconstruction error.
 
 ## Offline Archive
 
@@ -323,6 +329,11 @@ The archive step:
   - depth as `/compressedDepth` with PNG
 - writes the final archive bag as MCAP with zstd chunk compression
 - records provenance in `raw_episodes/<episode_id>/archive/archive_manifest.json`
+
+After full payload verification succeeds, the archive is the long-term
+ROS-native source for conversion and the capture bag may be deleted according
+to lab retention policy. Published depth is training-oriented and quantized;
+it does not replace the lossless archive.
 
 ## Standing Eval
 

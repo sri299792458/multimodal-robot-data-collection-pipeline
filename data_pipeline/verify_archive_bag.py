@@ -23,7 +23,7 @@ from data_pipeline.archive_verification import (  # noqa: E402
     verify_archive_payload_roundtrip,
     verify_archive_structure,
 )
-from data_pipeline.pipeline_utils import DEFAULT_RAW_EPISODES_DIR  # noqa: E402
+from data_pipeline.pipeline_utils import DEFAULT_RAW_EPISODES_DIR, write_json  # noqa: E402
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -55,7 +55,6 @@ def load_archive_context(episode_dir: Path, archive_dir_name: str) -> tuple[Path
 
     archive_manifest = json.loads(archive_manifest_path.read_text(encoding="utf-8"))
     image_transcode = archive_manifest.get("image_transcode") or {}
-    trim_info = archive_manifest.get("trim") or {}
 
     image_pairs = [
         ArchiveImageTopicPair(
@@ -140,6 +139,18 @@ def main(argv: list[str] | None = None) -> int:
         lightweight_ok = result["lightweight"]["status"] == "ok"
         full_ok = result["full_payload"] is None or result["full_payload"]["status"] == "ok"
         overall_ok = lightweight_ok and full_ok
+
+        if args.full_payload:
+            archive_output = archive_manifest.setdefault("archive_output", {})
+            archive_output["verification"] = {
+                "lightweight": result["lightweight"],
+                "full_payload": result["full_payload"],
+            }
+            archive_output["verified"] = overall_ok
+            write_json(
+                episode_dir / args.archive_dir_name / "archive_manifest.json",
+                archive_manifest,
+            )
 
         if args.print_json:
             print(json.dumps(result, indent=2))
