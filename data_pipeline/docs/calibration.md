@@ -15,12 +15,58 @@ The calibration system has two parts:
 The sensors file tells the pipeline which physical device is which sensor key.
 The calibration results file tells the pipeline where that camera is.
 
-Current lab board default:
+Current printed lab board:
 
 - dictionary: `DICT_4X4_50`
-- squares: `6 x 9`
+- squares: `9 x 6`
 - square length: `0.03 m`
 - marker length: `0.022 m`
+
+The examples below pass these board settings explicitly so the calibration run
+matches the printed target.
+
+
+## Generate The Board
+
+Use this if the calibration board needs to be reprinted:
+
+```python
+import cv2
+import numpy as np
+from PIL import Image
+
+cols = 9
+rows = 6
+square_length_mm = 30
+marker_length_mm = 22
+dpi = 300
+
+px_per_mm = dpi / 25.4
+page_width_px = round(11 * dpi)
+page_height_px = round(8.5 * dpi)
+board_width_px = round(cols * square_length_mm * px_per_mm)
+board_height_px = round(rows * square_length_mm * px_per_mm)
+
+aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+board = cv2.aruco.CharucoBoard(
+    (cols, rows),
+    square_length_mm,
+    marker_length_mm,
+    aruco_dict,
+)
+board_img = board.generateImage((board_width_px, board_height_px), marginSize=0, borderBits=1)
+
+page = 255 * np.ones((page_height_px, page_width_px), dtype=np.uint8)
+x0 = (page_width_px - board_width_px) // 2
+y0 = (page_height_px - board_height_px) // 2
+page[y0 : y0 + board_height_px, x0 : x0 + board_width_px] = board_img
+
+img = Image.fromarray(page)
+img.save("charuco_9x6_30mm_22mm_DICT4X4_50_LETTER_landscape.png", dpi=(dpi, dpi))
+img.convert("RGB").save("charuco_9x6_30mm_22mm_DICT4X4_50_LETTER_landscape.pdf", resolution=dpi)
+```
+
+Print the PDF at `100%` scale and measure one square. It should be `30 mm`.
 
 
 ## Current Assumptions
@@ -64,6 +110,25 @@ source .venv/bin/activate
 python data_pipeline/record_calibration_poses.py --active-arms lightning
 ```
 
+To see the wrist camera while selecting poses, pass a preview camera:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source .venv/bin/activate
+python data_pipeline/record_calibration_poses.py \
+  --active-arms lightning \
+  --preview-camera /spark/cameras/lightning/wrist_1 \
+  --sensors-file data_pipeline/configs/sensors.local.yaml \
+  --squares-x 9 \
+  --squares-y 6 \
+  --square-length 0.03 \
+  --marker-length 0.022 \
+  --dictionary DICT_4X4_50
+```
+
+The preview window overlays the live marker and ChArUco counts. Record poses
+when the board is clearly visible and the ChArUco count is stable.
+
 Controls:
 
 - `r`
@@ -88,11 +153,16 @@ Calibrate all cameras found in the sensors file:
 source /opt/ros/jazzy/setup.bash
 source .venv/bin/activate
 python data_pipeline/calibrate_rig.py \
-  --sensors-file data_pipeline/configs/sensors.local.yaml
+  --sensors-file data_pipeline/configs/sensors.local.yaml \
+  --squares-x 9 \
+  --squares-y 6 \
+  --square-length 0.03 \
+  --marker-length 0.022 \
+  --dictionary DICT_4X4_50
 ```
 
-The runner defaults to the lab board above, so you only need to pass board
-flags if you are calibrating against a different ChArUco target.
+Use different board flags only if you are calibrating against a different
+ChArUco target.
 
 To calibrate only selected cameras:
 
@@ -100,7 +170,12 @@ To calibrate only selected cameras:
 python data_pipeline/calibrate_rig.py \
   --sensors-file data_pipeline/configs/sensors.local.yaml \
   --camera /spark/cameras/lightning/wrist_1 \
-  --camera /spark/cameras/world/scene_1
+  --camera /spark/cameras/world/scene_1 \
+  --squares-x 9 \
+  --squares-y 6 \
+  --square-length 0.03 \
+  --marker-length 0.022 \
+  --dictionary DICT_4X4_50
 ```
 
 Notes:
