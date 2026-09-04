@@ -106,6 +106,11 @@ Camera slots are 1-based. This is intentional for user-facing consistency with j
 | `/spark/cameras/{attachment}/{camera_slot}/depth/image_rect_raw` | `sensor_msgs/msg/Image` | raw sensor | `host_capture_time_v1` immediately after `wait_for_frames()` returns | raw-only or published-depth depending on profile |
 | `/spark/tactile/{arm}/{finger_slot}/color/image_raw` | `sensor_msgs/msg/Image` | raw sensor | `host_capture_time_v1` immediately after `get_image()` returns | raw/published depending on profile |
 
+`/spark/{arm}/robot/eef_pose` is the active TCP pose in the UR base frame. The
+current setup keeps the active TCP at the tool flange. Its `PoseStamped`
+orientation is a standard unit quaternion converted from the axis-angle
+rotation vector returned by RTDE.
+
 
 ## Observed Rates On The Current Rig
 

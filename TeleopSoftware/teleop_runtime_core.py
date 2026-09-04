@@ -68,7 +68,7 @@ def _gripper_message(stamp, name: str, value: float) -> JointState:
 def _pose_message(stamp, pose) -> PoseStamped:
     if len(pose) < 6:
         raise ValueError(f"Expected 6D pose, got {pose}")
-    quat = R.from_euler("xyz", pose[3:6]).as_quat()
+    quat = R.from_rotvec(pose[3:6]).as_quat()
     msg = PoseStamped()
     _copy_stamp(msg.header.stamp, stamp)
     msg.header.frame_id = "base"

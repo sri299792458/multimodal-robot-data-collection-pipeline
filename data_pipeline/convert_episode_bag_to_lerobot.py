@@ -21,6 +21,7 @@ import yaml
 from geometry_msgs.msg import PoseStamped, WrenchStamped
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
+from scipy.spatial.transform import Rotation
 from sensor_msgs.msg import CompressedImage, Image, JointState
 from std_msgs.msg import Bool
 
@@ -198,23 +199,11 @@ def stamp_to_ns(stamp) -> int:
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
 
-def quaternion_to_rpy(
+def quaternion_to_rotation_vector(
     x: float, y: float, z: float, w: float
 ) -> tuple[float, float, float]:
-    sinr_cosp = 2.0 * (w * x + y * z)
-    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
-    roll = math.atan2(sinr_cosp, cosr_cosp)
-
-    sinp = 2.0 * (w * y - z * x)
-    if abs(sinp) >= 1.0:
-        pitch = math.copysign(math.pi / 2.0, sinp)
-    else:
-        pitch = math.asin(sinp)
-
-    siny_cosp = 2.0 * (w * z + x * y)
-    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-    yaw = math.atan2(siny_cosp, cosy_cosp)
-    return roll, pitch, yaw
+    rotvec = Rotation.from_quat([x, y, z, w]).as_rotvec()
+    return tuple(float(value) for value in rotvec)
 
 
 def decode_image_to_rgb(msg: Image) -> np.ndarray:
@@ -400,15 +389,15 @@ def parse_message(
 
     if isinstance(msg, PoseStamped):
         q = msg.pose.orientation
-        roll, pitch, yaw = quaternion_to_rpy(q.x, q.y, q.z, q.w)
+        rx, ry, rz = quaternion_to_rotation_vector(q.x, q.y, q.z, q.w)
         value = np.asarray(
             [
                 msg.pose.position.x,
                 msg.pose.position.y,
                 msg.pose.position.z,
-                roll,
-                pitch,
-                yaw,
+                rx,
+                ry,
+                rz,
             ],
             dtype=np.float32,
         )

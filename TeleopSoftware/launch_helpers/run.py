@@ -64,7 +64,7 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize, clock):
                 # Velocity control: 
                 if arm not in start_pose or ros_data[arm.lower() + '_change_mode'] == True:
                     pose = URs.get_receive(arm).getActualTCPPose()
-                    start_pose[arm] = pose[:3], R.from_euler('xyz', pose[3:])
+                    start_pose[arm] = pose[:3], R.from_rotvec(pose[3:])
                     ros_data[arm.lower() + '_change_mode'] = False
                 else:
                     xyz_scale = 0.005 * 200
@@ -105,7 +105,7 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize, clock):
         elif control_modes[arm] == 'VR':
             if arm not in start_pose or ros_data[arm.lower() + '_change_mode'] == True:
                 pose = URs.get_receive(arm).getActualTCPPose()
-                start_pose[arm] = pose[:3], R.from_euler('xyz', pose[3:])
+                start_pose[arm] = pose[:3], R.from_rotvec(pose[3:])
                 ros_data[arm.lower() + '_change_mode'] = False
             else:
                 if arm.lower()+'_vr_data' in ros_data:
@@ -151,8 +151,8 @@ def ros_update(fields, ros_data, control_modes, URs, pubs, optimize, clock):
                         if not rpy_button > 0.5: # Rotate the end effector
                             new_rot = ee_rot
 
-                        new_rpy = R.as_euler(new_rot, 'xyz')
-                        URs.servoL(arm, (np.append(new_xyz, new_rpy), 0.0, 0.0, ur_time, ur_lookahead_time, ur_gain))
+                        new_rotvec = new_rot.as_rotvec()
+                        URs.servoL(arm, (np.append(new_xyz, new_rotvec), 0.0, 0.0, ur_time, ur_lookahead_time, ur_gain))
                         URs.get_gripper(arm).set(int(gripper*255))
 
                     else: # Reset the start pose

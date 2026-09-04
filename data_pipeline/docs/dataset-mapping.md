@@ -281,6 +281,11 @@ The current bimanual `multisensor_20hz` profile uses this flat `observation.stat
 37. `thunder_ft_ty`
 38. `thunder_ft_tz`
 
+For each arm, `*_eef_rx`, `*_eef_ry`, and `*_eef_rz` are the three components
+of an axis-angle rotation vector in radians. They are not roll, pitch, and yaw.
+The converter derives this rotation vector from the valid quaternion carried by
+the source `PoseStamped` message.
+
 ### Why
 
 This keeps all robot-side low-dimensional state in one compact feature, which is the easiest shape for LeRobot-style datasets and policy code. It also avoids prematurely creating many custom low-dimensional namespaces.
